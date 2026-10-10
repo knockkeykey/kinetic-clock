@@ -1,0 +1,149 @@
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --bg: #ecebe9;
+  --text: #6b6966;
+  --serif: 'Noto Serif SC', 'Songti SC', 'STSong', serif;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  transition: background-color 3s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+body.idle { cursor: none; }
+
+#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+#stage {
+  position: fixed;
+  left: var(--gx);
+  top: var(--gy);
+  width: var(--gw);
+  height: var(--gh);
+  pointer-events: none;
+}
+
+.band {
+  position: absolute;
+  top: calc(100% + var(--pitch) * 0.24);
+  font-family: var(--serif);
+  font-weight: 300;
+  font-size: var(--fs);
+  letter-spacing: 0.12em;
+  color: var(--text);
+  white-space: nowrap;
+  transition: color 3s, opacity 1.2s;
+}
+.band.left { left: calc(var(--pitch) * 0.045); }
+.band.right { right: calc(var(--pitch) * 0.045); }
+.band:empty { opacity: 0; }
+
+#sec {
+  position: absolute;
+  top: calc(100% + var(--pitch) * 0.12);
+  left: calc(var(--pitch) * 0.045);
+  right: calc(var(--pitch) * 0.045);
+  height: 1px;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  overflow: hidden;
+  transition: opacity 1s;
+}
+#sec i {
+  display: block;
+  height: 100%;
+  background: color-mix(in srgb, var(--text) 45%, transparent);
+  transform-origin: left;
+  animation: sec 60s linear infinite;
+  animation-delay: var(--sec-delay, 0s);
+}
+body.no-sec #sec { opacity: 0; }
+@keyframes sec { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+#hint {
+  position: fixed;
+  left: 50%;
+  bottom: max(4vh, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  font: 300 13px/1 var(--serif);
+  letter-spacing: 0.4em;
+  color: var(--text);
+  opacity: 0.6;
+  transition: opacity 1.5s;
+  pointer-events: none;
+}
+#hint.gone { opacity: 0; }
+
+#tools {
+  position: fixed;
+  z-index: 2;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s;
+}
+#tools.show { opacity: 0.7; pointer-events: auto; }
+#tools button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: color 3s;
+}
+#tools button:focus-visible { outline: 1px solid var(--text); }
+/* 白天显示月亮（点了变黑），夜里显示太阳 */
+#mode .sun, body.dark #mode .moon { display: none; }
+body.dark #mode .sun { display: block; }
+
+#panel {
+  position: fixed;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 14px;
+  min-width: 260px;
+  padding: 22px 24px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+  font: 300 14px/1.4 var(--serif);
+  color: var(--text);
+}
+#panel[hidden] { display: none; }
+#panel label { display: grid; gap: 6px; }
+#panel label.row { display: flex; align-items: center; gap: 8px; }
+#panel input:not([type]), #panel select {
+  font: inherit;
+  color: inherit;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+  border-radius: 6px;
+  background: transparent;
+}
+#panel button {
+  font: inherit;
+  color: var(--bg);
+  background: var(--text);
+  border: 0;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+}

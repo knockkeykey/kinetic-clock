@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#ecebe9" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="Kinetic Clock — 24 个钟组成的动态时钟屏保，附农历、节气、天气" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <title>Kinetic Clock</title>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="stage">
+      <div id="sec"><i></i></div>
+      <div class="band left" id="lunar"></div>
+      <div class="band right" id="weather"></div>
+    </div>
+    <div id="hint">轻点进入</div>
+    <div id="tools">
+      <button id="mode" aria-label="切换日夜" type="button">
+        <svg class="moon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
+      <button id="gear" aria-label="设置" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+      </button>
+    </div>
+    <form id="panel" hidden>
+      <label>城市<input name="city" placeholder="留空则自动定位" autocomplete="off" /></label>
+      <label>主题
+        <select name="theme"><option value="auto">随日出日落</option><option value="light">白</option><option value="dark">黑</option></select>
+      </label>
+      <label>日期 / 温度
+        <select name="every"><option value="0">关闭</option><option value="5">每 5 分钟</option><option value="10">每 10 分钟</option><option value="15">每 15 分钟</option><option value="30">每 30 分钟</option></select>
+      </label>
+      <label class="row"><input type="checkbox" name="seconds" />秒进度线</label>
+      <label class="row"><input type="checkbox" name="sound" />机械声</label>
+      <button type="submit">完成</button>
+    </form>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
