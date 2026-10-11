@@ -17,6 +17,7 @@ uniform vec3 u_light;    // 指向光源，z 为高度
 uniform vec3 u_bg;
 uniform vec3 u_hand;
 uniform float u_shadow;
+uniform float u_tex;     // 面板纹理强度 0..1
 
 const float R = 0.455;     // 凹盘半径（以 pitch 为单位）
 const float LEN = 0.40;    // 指针长度
@@ -41,6 +42,38 @@ float hands(vec2 p, int i) {
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
+// 值噪声 + fbm：做面板的矿物灰泥质感
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash(i), b = hash(i + vec2(1.0, 0.0));
+  float c = hash(i + vec2(0.0, 1.0)), d = hash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+  for (int i = 0; i < 4; i++) { v += a * vnoise(p); p = m * p; a *= 0.5; }
+  return v;
+}
+// 材质高度场：大块云状起伏 + 细密颗粒 + 一层斜向纤维
+float surf(vec2 g) {
+  float cloud = fbm(g * 2.2);
+  float grain = vnoise(g * 95.0);
+  vec2 q = mat2(0.94, 0.34, -0.34, 0.94) * g;
+  float fiber = vnoise(vec2(q.x * 6.0, q.y * 140.0));
+  return cloud * 0.55 + grain * 0.25 + fiber * 0.2;
+}
+// 返回材质明暗系数：法线随高度场扰动，与光源方向点积产生极浅浮雕
+float texShade(vec2 g, vec2 L2, float px) {
+  float e = max(px, 0.002);
+  float h0 = surf(g);
+  vec2 grad = vec2(surf(g + vec2(e, 0.0)) - h0, surf(g + vec2(0.0, e)) - h0) / e;
+  float relief = dot(grad, L2) * 0.0009;
+  float mottle = (fbm(g * 0.9 + 7.3) - 0.5) * 0.028;
+  return 1.0 + clamp(relief, -0.025, 0.025) + mottle + (h0 - 0.5) * 0.012;
+}
+
 void main() {
   vec2 frag = gl_FragCoord.xy;
   vec2 g = (frag - u_origin) / u_pitch;
@@ -50,6 +83,8 @@ void main() {
 
   // 面板：沿光源方向极轻的明暗渐变
   vec3 col = u_bg * (0.985 + 0.03 * dot(normalize(frag - u_origin - vec2(4.0, 1.5) * u_pitch + 1e-4), L2) * 0.5);
+  float tex = mix(1.0, texShade(g, L2, px), u_tex);
+  col *= tex;
 
   ivec2 cell = ivec2(floor(g));
   if (cell.x >= 0 && cell.x < 8 && cell.y >= 0 && cell.y < 3) {
@@ -76,7 +111,8 @@ void main() {
     float rim = smoothstep(0.93, 1.0, r) * (1.0 - smoothstep(1.0, 1.0 + 2.0 * px / R, r));
     shade += rim * 0.05 * max(0.0, -dot(ph, L2));
 
-    vec3 dish = u_bg * shade;
+    // 盘内同一材质，但被压光过，纹理更浅
+    vec3 dish = u_bg * shade * mix(1.0, tex, 0.45);
 
     // 指针投影：离盘底有一段高度，沿光反方向偏移并虚化
     float lift = 0.035 + depthHere * 0.6;
@@ -133,7 +169,7 @@ export function createGL(canvas: HTMLCanvasElement): Renderer | null {
   const u = (n: string) => gl.getUniformLocation(prog, n)
   const U = {
     origin: u('u_origin'), pitch: u('u_pitch'), ang: u('u_ang'), len: u('u_len'), light: u('u_light'),
-    bg: u('u_bg'), hand: u('u_hand'), shadow: u('u_shadow'),
+    bg: u('u_bg'), hand: u('u_hand'), shadow: u('u_shadow'), tex: u('u_tex'),
   }
 
   return {
@@ -151,6 +187,8 @@ export function createGL(canvas: HTMLCanvasElement): Renderer | null {
       gl.uniform3fv(U.bg, f.palette.bg)
       gl.uniform3fv(U.hand, f.palette.hand)
       gl.uniform1f(U.shadow, f.palette.shadow)
+      // 夜里底色暗，同样的相对起伏更显眼，收一点
+      gl.uniform1f(U.tex, 1.0 - 0.35 * (1.0 - f.palette.shadow) / 0.45)
       gl.drawArrays(gl.TRIANGLES, 0, 3)
     },
   }
