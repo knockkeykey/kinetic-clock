@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { compose, isBlank, tempText } from './glyphs'
+import { compose, isBlank, tempText, type Hands } from './glyphs'
+import { GRAND } from './choreo'
 import { Scheduler, sample, type Segment } from './scheduler'
 
 const mod = (a: number) => ((Math.round(a) % 360) + 360) % 360
@@ -61,14 +62,23 @@ describe('scheduler', () => {
     expect(poseAt(s.at(m0 + 35_000), m0 + 35_000)).toEqual(flat('18°C'))
   })
 
-  it('tap trigger keeps continuity, refused near transition', () => {
-    const s = new Scheduler({ takeoverEvery: () => 0, temperature: () => 18 })
-    const m0 = new Date(2026, 9, 10, 9, 3, 0).getTime()
-    expect(s.trigger(m0 + 2_000)).toBe(true)
-    checkContinuity(s, m0, 2)
-    expect(poseAt(s.at(m0 + 10_000), m0 + 10_000)).toEqual(flat('1010'))
-    const m1 = m0 + 60_000
-    expect(s.trigger(m1 + 20_000)).toBe(false)
+  const handsAt = (seg: Segment, t: number): Hands[] => { const o = new Float32Array(48); sample(seg, t, o); return Array.from({ length: 24 }, (_, i) => [o[i * 2], o[i * 2 + 1]] as Hands) }
+
+  it('tap cycles time → date → temp → time right away, even mid-transition', () => {
+    for (const off of [2_000, 30_000, 45_000, 59_000]) {
+      const s = new Scheduler({ takeoverEvery: () => 0, temperature: () => 18 })
+      const t = new Date(2026, 9, 10, 9, 3, 0).getTime() + off
+      const kind = s.at(t).kind
+      expect(s.tap(t, handsAt(s.at(t), t))).toBe(true)
+      expect(s.at(t + 6_000).kind).toBe(kind === 'time' ? 'date' : 'temp')
+      const t2 = t + 7_000
+      expect(s.tap(t2, handsAt(s.at(t2), t2))).toBe(true)
+      expect(s.at(t2 + 6_000).kind).toBe('temp')
+      const t3 = t2 + 7_000
+      expect(s.tap(t3, handsAt(s.at(t3), t3))).toBe(true)
+      expect(s.at(t3 + 1).type).toBe('move')
+      checkContinuity(s, t, 3)
+    }
   })
 
   it('intro spins in without breaking continuity', () => {
@@ -127,5 +137,32 @@ describe('blank hands retract', () => {
       from.forEach((h, i) => { if (isBlank(h) && isBlank(to[i])) expect(l[i]).toBe(0) })
     }
     checkContinuity(s, m0, 1)
+  })
+})
+
+describe('debug switching', () => {
+  const opts = { takeoverEvery: () => 10, temperature: () => 21 }
+  const starts = [0, 15_000, 40_000, 44_000, 55_000]
+
+  it('show date / temp right away and return to time, at any moment', () => {
+    for (const kind of ['date', 'temp'] as const)
+      for (const off of starts) {
+        const s = new Scheduler(opts)
+        const t = new Date(2026, 9, 11, 14, 37).getTime() + off
+        const from = compose('1437')
+        expect(s.show(t, from, kind)).toBe(true)
+        expect(s.at(t + 6_000).kind).toBe(kind)
+        checkContinuity(s, t, 4)
+      }
+  })
+
+  it('play any choreography right away, including across the hour', () => {
+    for (const off of starts) {
+      const s = new Scheduler(opts)
+      const t = new Date(2026, 9, 11, 14, 59).getTime() + off
+      expect(s.land(t, compose('1459'), GRAND, 40_000)).toBe(true)
+      expect(s.at(t + 1).type).toBe('move')
+      checkContinuity(s, t, 4)
+    }
   })
 })

@@ -1,7 +1,9 @@
 import '@fontsource/noto-serif-sc/300.css'
 import './style.css'
 
-import { compose } from './glyphs'
+import { CHOREOS, GRAND, INTROS, QUICK } from './choreo'
+import * as clock from './clock'
+import { compose, type Hands } from './glyphs'
 import { fetchWeather, isNight, lightDir, lunarLine, resolvePlace, weatherLine, type Place, type Weather } from './info'
 import { createGL } from './render-gl'
 import { create2D, type Layout, type Renderer } from './render'
@@ -109,7 +111,7 @@ function nightTarget(d: Date) {
   if (settings.theme === 'dark') return 1
   return isNight(d, place) ? 1 : 0
 }
-let night = nightTarget(new Date())
+let night = nightTarget(new Date(clock.now()))
 let lastFrame = performance.now()
 let lastCss = ''
 
@@ -119,6 +121,10 @@ const lens = new Float32Array(24).fill(1)
 let raf = 0
 let timer = 0
 let current: Segment | null = null
+/** 调试：空格里收起的指针也画出来；blankMix 0..1 跟着它渐变，指针慢慢伸出 / 缩回 */
+let showBlanks = false
+let blankMix = 0
+const BLANK_MS = 1200
 
 function requestDraw() {
   if (raf) return
@@ -134,7 +140,7 @@ function onSegment(seg: Segment, now: number) {
 
 function frame(t: number) {
   raf = 0
-  const now = Date.now()
+  const now = clock.now()
   const d = new Date(now)
   const seg = sched.at(now)
   if (seg !== current) onSegment(seg, now)
@@ -155,10 +161,20 @@ function frame(t: number) {
     s.setProperty('--text', css(pal.text))
   }
 
+  const bt = showBlanks ? 1 : 0
+  if (blankMix !== bt) {
+    blankMix += Math.sign(bt - blankMix) * (dt / BLANK_MS)
+    blankMix = Math.max(0, Math.min(1, blankMix))
+  }
+  if (blankMix > 0) {
+    const k = 0.5 - 0.5 * Math.cos(Math.PI * blankMix)
+    for (let i = 0; i < lens.length; i++) lens[i] += (1 - lens[i]) * k
+  }
+
   const base = lightDir(d, place)
   const settling = renderer.draw({ angles, lens, layout, dpr, palette: pal, light: [base[0] + tilt[0] * 0.6, base[1] - tilt[1] * 0.45] })
 
-  const busy = moving || night !== nt || tiltDirty || settling === true
+  const busy = moving || blankMix !== bt || night !== nt || tiltDirty || settling === true
   tiltDirty = false
   if (busy) raf = requestAnimationFrame(frame)
   else timer = window.setTimeout(requestDraw, Math.max(16, Math.min(seg.end - now, 30_000)))
@@ -177,13 +193,13 @@ function scheduleTick() {
 
 // ---------- 信息带 / 秒线 ----------
 function updateBands() {
-  lunarEl.textContent = lunarLine(new Date())
+  lunarEl.textContent = lunarLine(new Date(clock.now()))
   weatherEl.textContent = weatherLine(weather, place)
 }
 
 function syncSeconds() {
   document.body.classList.toggle('no-sec', !settings.seconds)
-  const ms = Date.now() % 60_000
+  const ms = clock.now() % 60_000
   secBar.style.animation = 'none'
   void secBar.offsetWidth
   secBar.style.animation = ''
@@ -238,13 +254,22 @@ addEventListener('pointerup', (e) => {
   if (!panel.hidden || (e.target as HTMLElement).closest('#tools, #panel')) return
   showGear()
   if (!entered) { enter(); return }
-  if (sched.trigger(Date.now())) requestDraw()
-  else flashHint('稍后再试')
+  if (sched.tap(clock.now(), currentPose())) { current = null; syncSeconds(); updateBands(); requestDraw() }
 })
+
+const fsBtn = $('fs')
+function syncFs() { fsBtn.classList.toggle('on', !!document.fullscreenElement) }
+fsBtn.addEventListener('click', () => {
+  if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+  else void document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).catch(() => flashHint('浏览器不支持全屏'))
+  showGear()
+})
+document.addEventListener('fullscreenchange', syncFs)
+if (!document.documentElement.requestFullscreen) fsBtn.hidden = true
 
 // 日夜切换：在当前显示的反面固定下来，想恢复自动可在设置里选「随日出日落」
 modeBtn.addEventListener('click', () => {
-  const dark = nightTarget(new Date()) === 1
+  const dark = nightTarget(new Date(clock.now())) === 1
   save({ theme: dark ? 'light' : 'dark' })
   modeBtn.setAttribute('aria-label', dark ? '切换到夜间' : '切换到白天')
   showGear()
@@ -258,6 +283,10 @@ gear.addEventListener('click', () => {
   f.every.value = String(settings.every)
   f.seconds.checked = settings.seconds
   f.sound.checked = settings.sound
+  f.debug.checked = settings.debug
+  f.blanks.checked = showBlanks
+  debugBox.hidden = !settings.debug
+  if (settings.debug) f.at.value = localInput(clock.now())
   panel.hidden = false
   tools.classList.remove('show')
 })
@@ -269,14 +298,110 @@ panel.addEventListener('submit', (e) => {
   const cityChanged = city !== settings.city
   save({
     city, theme: f.theme.value as typeof settings.theme, every: Number(f.every.value),
-    seconds: f.seconds.checked, sound: f.sound.checked,
+    seconds: f.seconds.checked, sound: f.sound.checked, debug: f.debug.checked,
   })
   panel.hidden = true
+  if (!settings.debug) showBlanks = false
+  // 关掉调试模式时回到真实时间
+  if (!settings.debug && clock.shifted()) {
+    const from = currentPose()
+    clock.setTime(null)
+    sched.reset()
+    sched.land(clock.now(), from, QUICK, 3_000, 1_500)
+    current = null
+    updateBands()
+  }
   if (settings.sound) void sound.unlock().then(scheduleTick)
   else clearTimeout(tickTimer)
   syncSeconds()
   if (cityChanged) void refreshPlace()
   requestDraw()
+})
+
+// ---------- 调试 ----------
+const debugBox = $<HTMLFieldSetElement>('dbg')
+const dbg = panel.elements as unknown as Record<string, HTMLInputElement & HTMLSelectElement>
+const ALL = [...CHOREOS, GRAND, ...INTROS]
+/** 各编舞平时的时长 */
+const choreoMs = (name: string) => (name === 'grand' ? 40_000 : name.startsWith('intro') ? 14_000 : 18_000)
+dbg.choreo.innerHTML = ALL.map((c) => `<option value="${c.name}">${c.name}</option>`).join('')
+
+const p2 = (n: number) => String(n).padStart(2, '0')
+function localInput(t: number) {
+  const d = new Date(t)
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
+}
+
+/** 当前画面上的姿态，作为立刻切换的起点 */
+function currentPose(): Hands[] {
+  sample(sched.at(clock.now()), clock.now(), angles, lens)
+  return Array.from({ length: 24 }, (_, i) => [angles[i * 2], angles[i * 2 + 1]] as Hands)
+}
+
+/** 关面板、刷新画面，切换结果马上可见 */
+function applied(ok: boolean, fail = '稍后再试') {
+  panel.hidden = true
+  current = null
+  if (!ok) flashHint(fail)
+  syncSeconds()
+  updateBands()
+  requestDraw()
+}
+
+dbg.debug.addEventListener('change', () => { debugBox.hidden = !dbg.debug.checked; if (dbg.debug.checked) dbg.at.value = localInput(clock.now()) })
+
+dbg.blanks.addEventListener('change', () => { showBlanks = dbg.blanks.checked; requestDraw() })
+
+// 设置窗口：按住空白处拖动
+let drag: { id: number; x: number; y: number; px: number; py: number } | null = null
+let panelPos: [number, number] = [0, 0]
+function placePanel(x: number, y: number) {
+  // 至少留 40px 在屏幕内，拖不丢
+  const r = panel.getBoundingClientRect()
+  const mx = (innerWidth + r.width) / 2 - 40, my = (innerHeight + r.height) / 2 - 40
+  panelPos = [Math.max(-mx, Math.min(mx, x)), Math.max(-my, Math.min(my, y))]
+  panel.style.setProperty('--px', `${panelPos[0]}px`)
+  panel.style.setProperty('--py', `${panelPos[1]}px`)
+}
+panel.addEventListener('pointerdown', (e) => {
+  if ((e.target as HTMLElement).closest('input, select, button, label.row')) return
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY, px: panelPos[0], py: panelPos[1] }
+  panel.setPointerCapture(e.pointerId)
+  panel.classList.add('dragging')
+})
+panel.addEventListener('pointermove', (e) => {
+  if (drag?.id === e.pointerId) placePanel(drag.px + e.clientX - drag.x, drag.py + e.clientY - drag.y)
+})
+const endDrag = (e: PointerEvent) => { if (drag?.id !== e.pointerId) return; drag = null; panel.classList.remove('dragging') }
+panel.addEventListener('pointerup', endDrag)
+panel.addEventListener('pointercancel', endDrag)
+
+$('dbg-set').addEventListener('click', () => {
+  const t = new Date(dbg.at.value).getTime()
+  if (Number.isNaN(t)) { flashHint('时间格式不对'); return }
+  const from = currentPose()
+  clock.setTime(t)
+  sched.reset()
+  applied(sched.land(clock.now(), from, QUICK, 3_000, 1_500))
+})
+
+$('dbg-real').addEventListener('click', () => {
+  const from = currentPose()
+  clock.setTime(null)
+  sched.reset()
+  applied(sched.land(clock.now(), from, QUICK, 3_000, 1_500))
+})
+
+debugBox.querySelectorAll<HTMLButtonElement>('[data-show]').forEach((b) => b.addEventListener('click', () => {
+  const kind = b.dataset.show as 'time' | 'date' | 'temp'
+  const from = currentPose()
+  const ok = kind === 'time' ? sched.land(clock.now(), from, QUICK, 3_000, 1_500) : sched.show(clock.now(), from, kind)
+  applied(ok, kind === 'temp' && !weather ? '还没有温度数据' : '稍后再试')
+}))
+
+$('dbg-play').addEventListener('click', () => {
+  const c = ALL.find((x) => x.name === dbg.choreo.value)!
+  applied(sched.land(clock.now(), currentPose(), c, choreoMs(c.name)))
 })
 
 // 桌面端鼠标静止 3 秒隐藏
@@ -297,7 +422,7 @@ document.addEventListener('visibilitychange', () => {
 resize()
 updateBands()
 syncSeconds()
-sched.intro(Date.now(), compose('    '))
+sched.intro(clock.now(), compose('    '))
 requestDraw()
 void refreshPlace()
 setInterval(() => void refreshWeather(), 30 * 60_000)

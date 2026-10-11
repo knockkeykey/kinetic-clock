@@ -116,60 +116,50 @@ export class Scheduler {
     return segs.find((s) => now >= s.start && now < s.end) ?? segs[segs.length - 1]
   }
 
-  /** 从 now 起替换当前静止片段的剩余部分 */
-  private splice(now: number, make: (hold: Hold) => Segment[]): boolean {
-    const m0 = Math.floor(now / MIN) * MIN
-    const segs = this.segments(m0)
-    const i = segs.findIndex((s) => now >= s.start && now < s.end)
-    if (i < 0 || segs[i].type !== 'hold') return false
-    const hold = segs[i] as Hold
-    const inserted = make(hold)
-    if (!inserted.length) return false
-    const head: Segment[] = now > hold.start ? [{ ...hold, end: now }] : []
-    segs.splice(i, 1, ...head, ...inserted)
-    return true
+  /** 轻点：立刻切到下一个画面，时间 → 日期 → 温度 → 时间，任何时刻都生效 */
+  tap(now: number, from: Hands[]): boolean {
+    const kind = this.at(now).kind
+    if (kind === 'time') return this.show(now, from, 'date')
+    if (kind === 'date' && this.opts.temperature() !== null) return this.show(now, from, 'temp')
+    return this.land(now, from, QUICK, QUICK_MS, 3 * S)
   }
 
-  /** 轻点：播一遍"日期 → 温度"。过渡中或离下次过渡不足 25s 时返回 false */
-  trigger(now: number): boolean {
-    return this.splice(now, (hold) => {
-      const left = hold.end - now
-      if (hold.kind !== 'time' || left < 25 * S) return []
-      const extra = this.extraPoses(new Date(now))
-      const out: Segment[] = []
-      let cursor = now
-      let last = hold.pose
-      const slot = 11 * S
-      for (const e of extra) {
-        const p = plan(QUICK, last, e.pose)
-        out.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: p, kind: e.kind })
-        out.push({ type: 'hold', start: cursor + QUICK_MS, end: cursor + slot, pose: e.pose, kind: e.kind, retractAt: retractAfter(QUICK, p.hidden, cursor, cursor + QUICK_MS) })
-        cursor += slot
-        last = e.pose
+  /** 清空时间线（调试改时间后重建） */
+  reset() {
+    this.cache.clear()
+    this.choreoByMinute.clear()
+    this.lastChoreo = -1
+  }
+
+  /** 截取片段的 [s, e) 部分；过渡片段保留原起止，进度不变 */
+  private clip(g: Segment, s: number, e: number): Segment {
+    return g.type === 'move' ? { ...g, start: s, end: e, span: g.span ?? [g.start, g.end] } : { ...g, start: s, end: e }
+  }
+
+  /** 把 [now, end) 之间原有的片段换成 insert，按分钟边界切开 */
+  private cut(now: number, end: number, insert: Segment[]) {
+    for (let m = Math.floor(now / MIN) * MIN; m < end; m += MIN) {
+      const a = Math.max(now, m), b = Math.min(end, m + MIN)
+      const kept: Segment[] = []
+      for (const g of this.segments(m)) {
+        if (g.end <= a || g.start >= b) { kept.push(g); continue }
+        if (g.start < a) kept.push(this.clip(g, g.start, a))
+        if (g.end > b) kept.push(this.clip(g, b, g.end))
       }
-      const room = hold.end - cursor
-      if (room >= QUICK_MS + 3 * S) {
-        const p = plan(QUICK, last, hold.pose)
-        out.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: p, kind: 'time' })
-        out.push({ ...hold, start: cursor + QUICK_MS, retractAt: retractAfter(QUICK, p.hidden, cursor, cursor + QUICK_MS) })
-        last = hold.pose
-      } else {
-        // 时间不够回到时间，就把最后一个姿态延长到下一次过渡
-        const tail = out[out.length - 1] as Hold
-        tail.end = hold.end
+      for (const g of insert) {
+        const s = Math.max(g.start, a), e = Math.min(g.end, b)
+        if (s < e) kept.push(this.clip(g, s, e))
       }
-      // 紧随其后的过渡要从最后停住的姿态出发
-      this.rebaseNextMove(now, hold.end, last)
-      return out
-    })
+      kept.sort((x, y) => x.start - y.start)
+      this.cache.set(m, kept)
+    }
   }
 
   /**
-   * 开场：从空盘先跳一段编舞，再落成时间。
+   * 从 from 跳一段 choreo，落成时间。
    * 落点选在 now + ms 附近、某个"时间"静止片段里；不够放就顺延到下一个时间片段，必要时跨分钟。
    */
-  intro(now: number, from: Hands[], ms = 14 * S, minMs = 9 * S): boolean {
-    const choreo = INTROS[Math.floor(Math.random() * INTROS.length)]
+  land(now: number, from: Hands[], choreo: Choreo, ms: number, minMs = ms): boolean {
     // 找落点：第一个能在 [now + minMs, hold.end - 500] 里落下的时间片段
     let target: Hold | null = null
     let end = 0
@@ -186,32 +176,28 @@ export class Scheduler {
     }
     if (!target) return false
     const p = plan(choreo, from, target.pose)
-    const span: [number, number] = [now, end]
-    // 把 [now, end) 之间原有的片段换成开场编舞，按分钟边界切开
-    for (let m = m0; m < end; m += MIN) {
-      const segs = this.segments(m)
-      const a = Math.max(now, m), b = Math.min(end, m + MIN)
-      const kept: Segment[] = []
-      for (const g of segs) {
-        if (g.end <= a || g.start >= b) { kept.push(g); continue }
-        if (g.start < a) kept.push({ ...g, end: a } as Segment)
-        if (g.end > b) {
-          const tail = { ...g, start: b } as Segment
-          if (g === target) (tail as Hold).retractAt = retractAfter(choreo, p.hidden, now, end)
-          kept.push(tail)
-        }
-      }
-      kept.push({ type: 'move', start: a, end: b, plan: p, kind: 'time', span })
-      kept.sort((x, y) => x.start - y.start)
-      this.cache.set(m, kept)
-    }
+    this.cut(now, end, [{ type: 'move', start: now, end, plan: p, kind: 'time' }])
+    const tail = this.segments(Math.floor(end / MIN) * MIN).find((g) => g.type === 'hold' && g.start === end) as Hold | undefined
+    if (tail) tail.retractAt = retractAfter(choreo, p.hidden, now, end)
     return true
   }
 
-  private rebaseNextMove(now: number, at: number, from: Hands[]) {
-    const segs = this.segments(Math.floor(now / MIN) * MIN)
-    const mv = segs.find((s) => s.type === 'move' && s.start === at) as Move | undefined
-    if (mv) mv.plan = plan(mv.plan.choreo, from, mv.plan.to)
+  /** 开场：从空盘先跳一段编舞，再落成时间 */
+  intro(now: number, from: Hands[], ms = 14 * S, minMs = 9 * S): boolean {
+    return this.land(now, from, INTROS[Math.floor(Math.random() * INTROS.length)], ms, minMs)
+  }
+
+  /** 立刻切到日期 / 温度，停 holdMs 后回到时间。没有温度数据时返回 false */
+  show(now: number, from: Hands[], kind: 'date' | 'temp', holdMs = 8 * S): boolean {
+    const e = this.extraPoses(new Date(now)).find((x) => x.kind === kind)
+    if (!e) return false
+    const p = plan(QUICK, from, e.pose)
+    const mid = now + QUICK_MS, end = mid + holdMs
+    this.cut(now, end, [
+      { type: 'move', start: now, end: mid, plan: p, kind },
+      { type: 'hold', start: mid, end, pose: e.pose, kind, retractAt: retractAfter(QUICK, p.hidden, now, mid) },
+    ])
+    return this.land(end, e.pose, QUICK, QUICK_MS, 3 * S)
   }
 }
 
