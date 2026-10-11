@@ -15,7 +15,8 @@ export interface Frame {
   palette: Palette
 }
 
-export interface Renderer { kind: 'webgl' | '2d'; draw(f: Frame): void }
+/** draw 返回 true 表示画面还没稳定（如运动模糊未清零），需要再画一帧 */
+export interface Renderer { kind: 'webgl' | '2d'; draw(f: Frame): boolean | void }
 
 export function create2D(canvas: HTMLCanvasElement): Renderer {
   const ctx = canvas.getContext('2d', { alpha: false })!

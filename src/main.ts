@@ -156,9 +156,9 @@ function frame(t: number) {
   }
 
   const base = lightDir(d, place)
-  renderer.draw({ angles, lens, layout, dpr, palette: pal, light: [base[0] + tilt[0] * 0.6, base[1] - tilt[1] * 0.45] })
+  const settling = renderer.draw({ angles, lens, layout, dpr, palette: pal, light: [base[0] + tilt[0] * 0.6, base[1] - tilt[1] * 0.45] })
 
-  const busy = moving || night !== nt || tiltDirty
+  const busy = moving || night !== nt || tiltDirty || settling === true
   tiltDirty = false
   if (busy) raf = requestAnimationFrame(frame)
   else timer = window.setTimeout(requestDraw, Math.max(16, Math.min(seg.end - now, 30_000)))
