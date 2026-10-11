@@ -23,6 +23,7 @@ const float R = 0.455;     // 凹盘半径（以 pitch 为单位）
 const float LEN = 0.40;    // 指针长度
 const float HW = 0.034;    // 指针半宽
 const float DEPTH = 0.16;  // 凹盘深度
+const float CAP = 1.3;     // 轴心帽半径 / 指针半宽
 
 float seg(vec2 p, vec2 b) {
   float h = clamp(dot(p, b) / dot(b, b), 0.0, 1.0);
@@ -37,7 +38,8 @@ float hands(vec2 p, int i) {
   float w = HW * smoothstep(0.0, 0.2, k);
   float d1 = seg(p, dir(u_ang[i * 2]) * LEN * k);
   float d2 = seg(p, dir(u_ang[i * 2 + 1]) * LEN * k);
-  return min(d1, d2) - w;
+  // 轴心压一颗略粗的帽
+  return min(min(d1, d2) - w, length(p) - w * CAP);
 }
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -72,6 +74,60 @@ float texShade(vec2 g, vec2 L2, float px) {
   float relief = dot(grad, L2) * 0.0009;
   float mottle = (fbm(g * 0.9 + 7.3) - 0.5) * 0.028;
   return 1.0 + clamp(relief, -0.025, 0.025) + mottle + (h0 - 0.5) * 0.012;
+}
+
+// 指针材质：拉丝金属。截面是平顶+倒角，倒角朝光一侧出一道锐利高光；
+// 顶面沿长度方向拉丝，各向异性光泽随指针转动扫过；轴心帽是旋压的同心纹
+vec3 handShade(vec2 p, int i, vec3 L, float px) {
+  float k = u_len[i];
+  float w = max(HW * smoothstep(0.0, 0.2, k), 1e-5);
+  vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+
+  // 找最近的那根
+  vec2 b1 = dir(u_ang[i * 2]) * LEN * k, b2 = dir(u_ang[i * 2 + 1]) * LEN * k;
+  float h1 = clamp(dot(p, b1) / dot(b1, b1), 0.0, 1.0);
+  float h2 = clamp(dot(p, b2) / dot(b2, b2), 0.0, 1.0);
+  vec2 q1 = p - b1 * h1, q2 = p - b2 * h2;
+  bool first = dot(q1, q1) < dot(q2, q2);
+  vec2 T = normalize(first ? b1 : b2);
+  vec2 q = first ? q1 : q2;
+
+  // 指针截面法线：中间平，外侧 45% 起倒角
+  float lq = length(q);
+  float u = clamp(lq / w, 0.0, 1.0);
+  vec2 qh = lq > 1e-6 ? q / lq : vec2(0.0);
+  vec3 nArm = normalize(vec3(qh * smoothstep(0.45, 1.0, u) * 2.6, 1.0));
+
+  // 轴心帽：低圆顶 + 外缘倒角
+  float capR = w * CAP;
+  float dc = length(p);
+  float uc = clamp(dc / capR, 0.0, 1.0);
+  vec2 ch = dc > 1e-6 ? p / dc : vec2(0.0);
+  vec3 nCap = normalize(vec3(ch * (uc * 0.5 + smoothstep(0.7, 1.0, uc) * 2.2), 1.0));
+  float onCap = 1.0 - smoothstep(capR - px, capR + px, dc);
+  vec3 n = normalize(mix(nArm, nCap, onCap));
+
+  float diff = clamp(dot(n, L) / L.z, 0.0, 1.4);
+  float spec = pow(max(dot(n, H), 0.0), 48.0);
+
+  // 各向异性光泽：拉丝方向与光垂直时最亮
+  vec2 Tg = mix(T, vec2(-ch.y, ch.x), onCap);
+  float th = dot(Tg, H.xy);
+  float aniso = pow(max(1.0 - th * th, 0.0), 40.0);
+  aniso *= mix(1.0 - smoothstep(0.4, 0.85, u), 1.0 - smoothstep(0.6, 0.9, uc), onCap);
+
+  // 拉丝纹以设备像素为尺度，避免缩放时走样
+  float across = dot(p, vec2(-T.y, T.x)), along = dot(p, T);
+  float gArm = vnoise(vec2(across / (px * 1.3), along / (px * 70.0))) - 0.5;
+  float gCap = vnoise(vec2(dc / (px * 0.9), 0.5)) - 0.5;
+  float grain = mix(gArm, gCap, onCap);
+
+  // 深色指针靠高光出质感；夜间浅色指针本身亮，高光收一些
+  float lum = dot(u_hand, vec3(0.299, 0.587, 0.114));
+  float specK = mix(0.25, 1.0, 1.0 - lum) * mix(0.6, 1.0, u_shadow);
+  vec3 c = u_hand * mix(1.0, diff, 0.6) * (1.0 + grain * 0.18);
+  c += vec3(0.84, 0.87, 0.92) * specK * (spec * 0.3 + aniso * (0.07 + grain * 0.05));
+  return c;
 }
 
 void main() {
@@ -127,9 +183,7 @@ void main() {
     // 指针本体
     float hd = hands(p, idx);
     float cov = (1.0 - smoothstep(-px * 0.75, px * 0.75, hd)) * fade;
-    // 极轻的立体感：靠光一侧稍亮
-    vec3 hc = u_hand * (1.0 + 0.04 * u_shadow);
-    col = mix(col, hc, cov * inside);
+    if (cov > 0.0) col = mix(col, handShade(p, idx, L, px), cov * inside);
   }
 
   col += (hash(frag) - 0.5) * 0.008;

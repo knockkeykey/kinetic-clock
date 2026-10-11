@@ -17,6 +17,7 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
 }
+body { visibility: visible; }
 body.idle { cursor: none; }
 
 #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }

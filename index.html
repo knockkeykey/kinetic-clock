@@ -10,6 +10,8 @@
     <meta name="description" content="Kinetic Clock — 24 个钟组成的动态时钟屏保，附农历、节气、天气" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <title>Kinetic Clock</title>
+    <!-- 样式由 JS 注入前先藏起页面，避免刷新时闪出无样式的按钮和文字 -->
+    <style>html{background:#ecebe9}body{visibility:hidden}</style>
   </head>
   <body>
     <canvas id="c"></canvas>
