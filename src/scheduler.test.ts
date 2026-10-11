@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { compose, tempText } from './glyphs'
+import { compose, isBlank, tempText } from './glyphs'
 import { Scheduler, sample, type Segment } from './scheduler'
 
 const mod = (a: number) => ((Math.round(a) % 360) + 360) % 360
 const poseAt = (seg: Segment, t: number) => { const o = new Float32Array(48); sample(seg, t, o); return [...o].map(mod) }
 const flat = (txt: string) => compose(txt).flat().map(mod)
+const lensAt = (seg: Segment, t: number) => { const o = new Float32Array(48), l = new Float32Array(24); sample(seg, t, o, l); return [...l] }
+/** 每格的期望长度：空格 0，其余 1 */
+const shown = (txt: string) => compose(txt).map((h) => (isBlank(h) ? 0 : 1))
+const close = (a: number[], b: number[]) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 5))
 
 /** 从 from 起（向下取整到分钟）检查：片段首尾相接，且前一段的末尾姿态 == 后一段的开头姿态 */
 function checkContinuity(s: Scheduler, from: number, minutes: number) {
@@ -19,6 +23,7 @@ function checkContinuity(s: Scheduler, from: number, minutes: number) {
       expect(b.start).toBe(a.end)
       if (b.start <= from) continue
       expect(poseAt(a, a.end)).toEqual(poseAt(b, b.start))
+      close(lensAt(a, a.end), lensAt(b, b.start))
     }
   }
 }
@@ -73,5 +78,32 @@ describe('scheduler', () => {
     expect(poseAt(s.at(t), t)).toEqual(flat('    '))
     expect(poseAt(s.at(t + 4_600), t + 4_600)).toEqual(flat('0904'))
     checkContinuity(s, t, 2)
+    // 开场从空盘长出
+    expect(lensAt(s.at(t), t)).toEqual(new Array(24).fill(0))
+  })
+})
+
+describe('blank hands retract', () => {
+  it('blank cells retract as soon as their own digit lands', () => {
+    const s = new Scheduler({ takeoverEvery: () => 0, temperature: () => null })
+    const m0 = new Date(2026, 9, 10, 11, 17, 0).getTime() // 1117：三个 1，各有 3 个空格
+    // 第一位数字先落定，整块板落定（:00）时它的空格已经收好
+    const first = lensAt(s.at(m0), m0)
+    compose('1117').forEach((h, i) => { if (i % 8 < 2 && isBlank(h)) expect(first[i]).toBe(0) })
+    // 落定后半秒内全部收完，循环随即停下
+    expect(lensAt(s.at(m0 + 500), m0 + 500)).toEqual(shown('1117'))
+    expect(sample(s.at(m0 + 500), m0 + 500, new Float32Array(48), new Float32Array(24))).toBe(false)
+  })
+
+  it('cells blank on both sides of a quick swap stay hidden', () => {
+    const s = new Scheduler({ takeoverEvery: () => 10, temperature: () => 5 })
+    const m0 = new Date(2026, 9, 1, 9, 10, 0).getTime() // 日期 1001 → 温度 " 5°C"
+    const swap = s.segments(m0).find((g) => g.type === 'move' && g.kind === 'temp')!
+    const from = compose('1001'), to = compose(' 5°C')
+    for (const t of [0.1, 0.5, 0.9]) {
+      const l = lensAt(swap, swap.start + t * (swap.end - swap.start))
+      from.forEach((h, i) => { if (isBlank(h) && isBlank(to[i])) expect(l[i]).toBe(0) })
+    }
+    checkContinuity(s, m0, 1)
   })
 })

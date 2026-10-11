@@ -1,7 +1,7 @@
 // 编排：每种编排是一串阶段（stage），每个阶段对每个钟给出终点角度、方向和额外圈数。
 // 整个过渡是 (进度 t, 钟位置, 起点, 终点) 的纯函数，任意时刻都能直接算出角度，不累积误差。
 
-import { COLS, ROWS, type Hands } from './glyphs'
+import { COLS, ROWS, isBlank, type Hands } from './glyphs'
 
 export interface Cell { col: number; row: number }
 type Dir = 1 | -1 | 0 // 1 顺时针，-1 逆时针，0 最短路径
@@ -20,7 +20,12 @@ interface Stage {
   spread?: number
 }
 
-export interface Choreo { name: string; stages: Stage[] }
+export interface Choreo {
+  name: string
+  stages: Stage[]
+  /** 安静过渡：首尾都是空格的钟保持隐藏，不跟着出来 */
+  quiet?: boolean
+}
 
 const ease = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : 0.5 - 0.5 * Math.cos(Math.PI * t))
 const mod = (a: number) => ((a % 360) + 360) % 360
@@ -108,6 +113,7 @@ export const GRAND: Choreo = {
 /** 变身之间的短过渡 */
 export const QUICK: Choreo = {
   name: 'quick',
+  quiet: true,
   stages: [{ w: 1, target: final, dir: () => [1, -1], delay: colN, spread: 0.25 }],
 }
 
@@ -117,10 +123,26 @@ export const INTRO: Choreo = {
   stages: [{ w: 1, target: final, dir: () => [1, -1], turns: () => [1, 1], delay: (c) => (c.row * COLS + c.col) / (ROWS * COLS - 1), spread: 0.4 }],
 }
 
-/** 每个阶段每个钟的起止角度预先算好，求值时只做插值 */
-export interface Plan { choreo: Choreo; keys: Hands[][] }
+/**
+ * 每个阶段每个钟的起止角度预先算好，求值时只做插值。
+ * grow：起点是空格（指针已缩回）且本次过渡要露面的钟，过渡开头伸出来；
+ * hidden：安静过渡里首尾都是空格的钟，全程不露面。
+ */
+export interface Plan { choreo: Choreo; keys: Hands[][]; to: Hands[]; grow: boolean[]; hidden: boolean[] }
+
+/**
+ * 空格指针收起：在该钟最后一段转动里就开始缩，正好在它落定那一刻收完；
+ * 伸出：从该钟开始转动那一刻起慢慢长出来。两者都靠提前开始，而不是加快速度。
+ */
+export const RETRACT_MS = 1400
+const GROW_MS = 1200
+
+/** 相对落定时刻 ms 毫秒（负数为落定前）时，空格指针剩下的长度（1 → 0） */
+export const retractLen = (ms: number) => 1 - ease(1 + ms / RETRACT_MS)
 
 export function plan(choreo: Choreo, from: Hands[], to: Hands[]): Plan {
+  const hidden = from.map((f, i) => !!choreo.quiet && isBlank(f) && isBlank(to[i]))
+  const grow = from.map((f, i) => isBlank(f) && !hidden[i])
   const keys: Hands[][] = [from.map((h) => [...h] as Hands)]
   let prev = keys[0]
   for (const s of choreo.stages) {
@@ -134,7 +156,45 @@ export function plan(choreo: Choreo, from: Hands[], to: Hands[]): Plan {
     keys.push(next)
     prev = next
   }
-  return { choreo, keys }
+  return { choreo, keys, to, grow, hidden }
+}
+
+/** 每个钟在过渡里落定的时刻（0..1）：最后一段里它自己的转动结束时，与姿态无关 */
+export function landTimes(choreo: Choreo): number[] {
+  const { stages } = choreo
+  const s = stages[stages.length - 1]
+  const total = stages.reduce((a, x) => a + x.w, 0)
+  const spread = s.delay ? s.spread ?? 0.3 : 0
+  return Array.from({ length: COLS * ROWS }, (_, i) => {
+    const c: Cell = { col: i % COLS, row: Math.floor(i / COLS) }
+    const d = s.delay ? s.delay(c) * spread : 0
+    // 局部进度到 d + (1 - spread) 时这一钟走完
+    return Math.min(1, (total - s.w + s.w * (d + 1 - spread)) / total)
+  })
+}
+
+/**
+ * t ∈ [0,1] 时每个钟的指针长度（0..1）：
+ * 伸出的钟从开始转动起慢慢长出来；终点是空格的钟在最后一段转动里缩回，落定时收完。
+ * dur 为过渡总时长（毫秒），用来换算成真实时间。
+ */
+export function evaluateLen(p: Plan, t: number, dur: number, out: Float32Array) {
+  const { stages } = p.choreo
+  const s = stages[0]
+  const total = stages.reduce((a, x) => a + x.w, 0)
+  const spread = s.delay ? s.spread ?? 0.3 : 0
+  const land = landTimes(p.choreo)
+  for (let i = 0; i < p.grow.length; i++) {
+    if (p.hidden[i]) { out[i] = 0; continue }
+    let k = 1
+    if (p.grow[i]) {
+      const c: Cell = { col: i % COLS, row: Math.floor(i / COLS) }
+      const begin = (s.delay ? s.delay(c) * spread : 0) * (s.w / total)
+      k = ease(((t - begin) * dur) / GROW_MS)
+    }
+    if (isBlank(p.to[i])) k = Math.min(k, retractLen((t - land[i]) * dur))
+    out[i] = k
+  }
 }
 
 /** t ∈ [0,1] 时整个面板的角度 */

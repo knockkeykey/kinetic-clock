@@ -8,6 +8,8 @@ const U = 0, R = 90, D = 180, L = 270
 /** 空格姿态：两根都指向左下 */
 export const IDLE: Hands = [225, 225]
 const E = IDLE
+/** 这一格不属于任何笔画（字形里填的是 E）。真实笔画不会两根都落在 225°，所以按值判断即可 */
+export const isBlank = (h: Hands) => h[0] === IDLE[0] && h[1] === IDLE[1]
 
 export const GLYPHS: Record<string, Glyph> = {
   '0': [[R, D], [L, D], [U, D], [U, D], [U, R], [U, L]],

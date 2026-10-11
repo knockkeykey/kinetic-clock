@@ -3,18 +3,24 @@
 //  每 N 分钟  :15 日期 → :26 温度 → :42 从温度直接过渡到下一分钟
 //  :59 分钟   :20 开始 40s 整点大编排
 
-import { CHOREOS, GRAND, INTRO, QUICK, evaluate, plan, type Choreo, type Plan } from './choreo'
-import { compose, dateText, tempText, timeText, type Hands } from './glyphs'
+import { CHOREOS, GRAND, INTRO, QUICK, evaluate, evaluateLen, landTimes, plan, retractLen, type Choreo, type Plan } from './choreo'
+import { compose, dateText, isBlank, tempText, timeText, type Hands } from './glyphs'
 
 export type Kind = 'time' | 'date' | 'temp'
 
-export interface Hold { type: 'hold'; start: number; end: number; pose: Hands[]; kind: Kind }
+/** retractAt：每个空格钟的落定时刻（绝对时间，缩回在此刻收完）；-Infinity 表示早已藏好 */
+export interface Hold { type: 'hold'; start: number; end: number; pose: Hands[]; kind: Kind; retractAt: number[] }
 export interface Move { type: 'move'; start: number; end: number; plan: Plan; kind: Kind }
 export type Segment = Hold | Move
 
 const MIN = 60_000
 const S = 1000
 const QUICK_MS = 5 * S
+
+/** 过渡 [start, end] 之后，各空格钟的落定时刻（安静过渡里一直藏着的记为 -Infinity） */
+function retractAfter(choreo: Choreo, hidden: boolean[] | null, start: number, end: number): number[] {
+  return landTimes(choreo).map((l, i) => (hidden?.[i] ? -Infinity : start + l * (end - start)))
+}
 
 export interface ScheduleOptions {
   /** 每多少分钟展示一次日期/温度，0 为关闭 */
@@ -40,8 +46,16 @@ export class Scheduler {
     return CHOREOS[i]
   }
 
+  /** 上一分钟末尾那段编舞过渡之后，各钟的落定时刻（只取编舞和时间，不必重建整分钟） */
+  private prevLand(m0: number): number[] {
+    const p0 = m0 - MIN
+    if (new Date(p0).getMinutes() === 59) return retractAfter(GRAND, null, p0 + 20 * S, m0)
+    return retractAfter(this.pickChoreo(p0), null, p0 + 42 * S, m0)
+  }
+
   private build(m0: number): Segment[] {
     const now = new Date(m0)
+    const landed = this.prevLand(m0)
     const timePose = compose(timeText(now))
     const nextTime = compose(timeText(new Date(m0 + MIN)))
     const isHourEdge = now.getMinutes() === 59
@@ -51,7 +65,7 @@ export class Scheduler {
 
     if (isHourEdge) {
       const t0 = m0 + 20 * S
-      segs.push({ type: 'hold', start: m0, end: t0, pose: timePose, kind: 'time' })
+      segs.push({ type: 'hold', start: m0, end: t0, pose: timePose, kind: 'time', retractAt: landed })
       segs.push({ type: 'move', start: t0, end: m0 + MIN, plan: plan(GRAND, timePose, nextTime), kind: 'time' })
       return segs
     }
@@ -60,17 +74,18 @@ export class Scheduler {
     let last = timePose
     if (takeover) {
       const extra = this.extraPoses(now)
-      segs.push({ type: 'hold', start: m0, end: m0 + 15 * S, pose: timePose, kind: 'time' })
+      segs.push({ type: 'hold', start: m0, end: m0 + 15 * S, pose: timePose, kind: 'time', retractAt: landed })
       cursor = m0 + 15 * S
       const slot = (42 * S - 15 * S) / extra.length
       for (const e of extra) {
-        segs.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: plan(QUICK, last, e.pose), kind: e.kind })
-        segs.push({ type: 'hold', start: cursor + QUICK_MS, end: cursor + slot, pose: e.pose, kind: e.kind })
+        const p = plan(QUICK, last, e.pose)
+        segs.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: p, kind: e.kind })
+        segs.push({ type: 'hold', start: cursor + QUICK_MS, end: cursor + slot, pose: e.pose, kind: e.kind, retractAt: retractAfter(QUICK, p.hidden, cursor, cursor + QUICK_MS) })
         cursor += slot
         last = e.pose
       }
     } else {
-      segs.push({ type: 'hold', start: m0, end: m0 + 42 * S, pose: timePose, kind: 'time' })
+      segs.push({ type: 'hold', start: m0, end: m0 + 42 * S, pose: timePose, kind: 'time', retractAt: landed })
       cursor = m0 + 42 * S
     }
     segs.push({ type: 'move', start: cursor, end: m0 + MIN, plan: plan(this.pickChoreo(m0), last, nextTime), kind: 'time' })
@@ -125,15 +140,17 @@ export class Scheduler {
       let last = hold.pose
       const slot = 11 * S
       for (const e of extra) {
-        out.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: plan(QUICK, last, e.pose), kind: e.kind })
-        out.push({ type: 'hold', start: cursor + QUICK_MS, end: cursor + slot, pose: e.pose, kind: e.kind })
+        const p = plan(QUICK, last, e.pose)
+        out.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: p, kind: e.kind })
+        out.push({ type: 'hold', start: cursor + QUICK_MS, end: cursor + slot, pose: e.pose, kind: e.kind, retractAt: retractAfter(QUICK, p.hidden, cursor, cursor + QUICK_MS) })
         cursor += slot
         last = e.pose
       }
       const room = hold.end - cursor
       if (room >= QUICK_MS + 3 * S) {
-        out.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: plan(QUICK, last, hold.pose), kind: 'time' })
-        out.push({ ...hold, start: cursor + QUICK_MS })
+        const p = plan(QUICK, last, hold.pose)
+        out.push({ type: 'move', start: cursor, end: cursor + QUICK_MS, plan: p, kind: 'time' })
+        out.push({ ...hold, start: cursor + QUICK_MS, retractAt: retractAfter(QUICK, p.hidden, cursor, cursor + QUICK_MS) })
         last = hold.pose
       } else {
         // 时间不够回到时间，就把最后一个姿态延长到下一次过渡
@@ -150,9 +167,10 @@ export class Scheduler {
   intro(now: number, from: Hands[], ms = 4500): boolean {
     return this.splice(now, (hold) => {
       if (hold.end - now < ms + 500) return []
+      const p = plan(INTRO, from, hold.pose)
       return [
-        { type: 'move', start: now, end: now + ms, plan: plan(INTRO, from, hold.pose), kind: hold.kind },
-        { ...hold, start: now + ms },
+        { type: 'move', start: now, end: now + ms, plan: p, kind: hold.kind },
+        { ...hold, start: now + ms, retractAt: retractAfter(INTRO, p.hidden, now, now + ms) },
       ]
     })
   }
@@ -160,17 +178,25 @@ export class Scheduler {
   private rebaseNextMove(now: number, at: number, from: Hands[]) {
     const segs = this.segments(Math.floor(now / MIN) * MIN)
     const mv = segs.find((s) => s.type === 'move' && s.start === at) as Move | undefined
-    if (mv) mv.plan = plan(mv.plan.choreo, from, mv.plan.keys[mv.plan.keys.length - 1])
+    if (mv) mv.plan = plan(mv.plan.choreo, from, mv.plan.to)
   }
 }
 
-/** 求某一时刻 48 个角度；返回是否在运动 */
-export function sample(seg: Segment, now: number, out: Float32Array): boolean {
+/** 求某一时刻 48 个角度和 24 个指针长度；返回是否在运动（含空格指针缩回） */
+export function sample(seg: Segment, now: number, out: Float32Array, lens?: Float32Array): boolean {
   if (seg.type === 'hold') {
     seg.pose.forEach((h, i) => { out[i * 2] = h[0]; out[i * 2 + 1] = h[1] })
-    return false
+    let moving = false
+    seg.pose.forEach((h, i) => {
+      if (!isBlank(h)) { if (lens) lens[i] = 1; return }
+      const ms = now - seg.retractAt[i]
+      if (lens) lens[i] = retractLen(ms)
+      if (ms < 0) moving = true
+    })
+    return moving
   }
   const t = (now - seg.start) / (seg.end - seg.start)
   evaluate(seg.plan, t, out)
+  if (lens) evaluateLen(seg.plan, t, seg.end - seg.start, lens)
   return t < 1
 }

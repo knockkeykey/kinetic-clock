@@ -115,6 +115,7 @@ let lastCss = ''
 
 // ---------- 主循环 ----------
 const angles = new Float32Array(48)
+const lens = new Float32Array(24).fill(1)
 let raf = 0
 let timer = 0
 let current: Segment | null = null
@@ -141,7 +142,7 @@ function frame(t: number) {
   const d = new Date(now)
   const seg = sched.at(now)
   if (seg !== current) onSegment(seg, now)
-  const moving = sample(seg, now, angles)
+  const moving = sample(seg, now, angles, lens)
 
   const dt = Math.min(200, t - lastFrame)
   lastFrame = t
@@ -159,7 +160,7 @@ function frame(t: number) {
   }
 
   const base = lightDir(d, place)
-  renderer.draw({ angles, layout, dpr, palette: pal, light: [base[0] + tilt[0] * 0.6, base[1] - tilt[1] * 0.45] })
+  renderer.draw({ angles, lens, layout, dpr, palette: pal, light: [base[0] + tilt[0] * 0.6, base[1] - tilt[1] * 0.45] })
 
   const busy = moving || night !== nt || tiltDirty
   tiltDirty = false

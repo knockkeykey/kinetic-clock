@@ -12,6 +12,7 @@ out vec4 o;
 uniform vec2 u_origin;   // 网格左下角（设备像素，y 向上）
 uniform float u_pitch;   // 每个钟所占边长（设备像素）
 uniform float u_ang[48]; // 角度（度），0 向上，顺时针
+uniform float u_len[24]; // 指针长度系数 0..1（空格指针缩回到 0）
 uniform vec3 u_light;    // 指向光源，z 为高度
 uniform vec3 u_bg;
 uniform vec3 u_hand;
@@ -29,9 +30,13 @@ float seg(vec2 p, vec2 b) {
 vec2 dir(float deg) { float a = radians(deg); return vec2(sin(a), cos(a)); }
 
 float hands(vec2 p, int i) {
-  float d1 = seg(p, dir(u_ang[i * 2]) * LEN);
-  float d2 = seg(p, dir(u_ang[i * 2 + 1]) * LEN);
-  return min(d1, d2) - HW;
+  float k = u_len[i];
+  if (k <= 0.0) return 1.0;
+  // 长度随 k 缩短；最后 20% 连粗细一起收掉，轴心不留圆点
+  float w = HW * smoothstep(0.0, 0.2, k);
+  float d1 = seg(p, dir(u_ang[i * 2]) * LEN * k);
+  float d2 = seg(p, dir(u_ang[i * 2 + 1]) * LEN * k);
+  return min(d1, d2) - w;
 }
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -125,7 +130,7 @@ export function createGL(canvas: HTMLCanvasElement): Renderer | null {
 
   const u = (n: string) => gl.getUniformLocation(prog, n)
   const U = {
-    origin: u('u_origin'), pitch: u('u_pitch'), ang: u('u_ang'), light: u('u_light'),
+    origin: u('u_origin'), pitch: u('u_pitch'), ang: u('u_ang'), len: u('u_len'), light: u('u_light'),
     bg: u('u_bg'), hand: u('u_hand'), shadow: u('u_shadow'),
   }
 
@@ -139,6 +144,7 @@ export function createGL(canvas: HTMLCanvasElement): Renderer | null {
       gl.uniform2f(U.origin, f.layout.x * s, h - (f.layout.y + f.layout.pitch * 3) * s)
       gl.uniform1f(U.pitch, f.layout.pitch * s)
       gl.uniform1fv(U.ang, f.angles)
+      gl.uniform1fv(U.len, f.lens)
       gl.uniform3f(U.light, f.light[0], f.light[1], 0.62)
       gl.uniform3fv(U.bg, f.palette.bg)
       gl.uniform3fv(U.hand, f.palette.hand)

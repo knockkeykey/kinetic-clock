@@ -7,6 +7,8 @@ export interface Layout { x: number; y: number; pitch: number; w: number; h: num
 
 export interface Frame {
   angles: Float32Array
+  /** 每个钟的指针长度系数 0..1 */
+  lens: Float32Array
   layout: Layout
   dpr: number
   light: [number, number]
@@ -19,7 +21,7 @@ export function create2D(canvas: HTMLCanvasElement): Renderer {
   const ctx = canvas.getContext('2d', { alpha: false })!
   return {
     kind: '2d',
-    draw({ angles, layout, dpr, light, palette }: Frame) {
+    draw({ angles, lens, layout, dpr, light, palette }: Frame) {
       const { pitch } = layout
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.fillStyle = css(palette.bg)
@@ -39,18 +41,22 @@ export function create2D(canvas: HTMLCanvasElement): Renderer {
         ctx.arc(cx, cy, r, 0, Math.PI * 2)
         ctx.fill()
 
+        const k = lens[i]
+        if (k <= 0) continue
         ctx.save()
         ctx.beginPath()
         ctx.arc(cx, cy, r, 0, Math.PI * 2)
         ctx.clip()
         ctx.lineCap = 'round'
-        ctx.lineWidth = pitch * 0.068
+        // 长度随 k 缩短；最后 20% 连粗细一起收掉（与 WebGL 一致）
+        const wk = Math.min(1, k / 0.2)
+        ctx.lineWidth = pitch * 0.068 * wk * wk * (3 - 2 * wk)
         const stroke = (ox: number, oy: number) => {
           ctx.beginPath()
           for (const a of [angles[i * 2], angles[i * 2 + 1]]) {
             const rad = (a * Math.PI) / 180
             ctx.moveTo(cx + ox, cy + oy)
-            ctx.lineTo(cx + ox + Math.sin(rad) * len, cy + oy - Math.cos(rad) * len)
+            ctx.lineTo(cx + ox + Math.sin(rad) * len * k, cy + oy - Math.cos(rad) * len * k)
           }
           ctx.stroke()
         }
