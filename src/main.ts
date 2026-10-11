@@ -127,12 +127,8 @@ function requestDraw() {
 }
 
 function onSegment(seg: Segment, now: number) {
-  const prev = current
   current = seg
-  if (seg.type === 'move') {
-    maybeJitter(now)
-    if (settings.sound) sound.whirr((seg.end - now) / 1000)
-  } else if (prev?.type === 'move' && settings.sound) sound.click()
+  if (seg.type === 'move') maybeJitter(now)
   if (seg.start % 60_000 === 0) { syncSeconds(); updateBands() }
 }
 
@@ -166,6 +162,17 @@ function frame(t: number) {
   tiltDirty = false
   if (busy) raf = requestAnimationFrame(frame)
   else timer = window.setTimeout(requestDraw, Math.max(16, Math.min(seg.end - now, 30_000)))
+}
+
+// ---------- 滴答声 ----------
+let tickTimer = 0
+function scheduleTick() {
+  clearTimeout(tickTimer)
+  if (!settings.sound || document.hidden) return
+  tickTimer = window.setTimeout(() => {
+    sound.tick(Math.round(Date.now() / 1000) % 2 === 1)
+    scheduleTick()
+  }, 1000 - (Date.now() % 1000))
 }
 
 // ---------- 信息带 / 秒线 ----------
@@ -224,7 +231,7 @@ function enter() {
   } else addEventListener('deviceorientation', onOrientation)
   const el = document.documentElement
   if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {})
-  if (settings.sound) sound.unlock()
+  if (settings.sound) void sound.unlock().then(scheduleTick)
 }
 
 addEventListener('pointerup', (e) => {
@@ -265,7 +272,8 @@ panel.addEventListener('submit', (e) => {
     seconds: f.seconds.checked, sound: f.sound.checked,
   })
   panel.hidden = true
-  if (settings.sound) sound.unlock()
+  if (settings.sound) void sound.unlock().then(scheduleTick)
+  else clearTimeout(tickTimer)
   syncSeconds()
   if (cityChanged) void refreshPlace()
   requestDraw()
@@ -281,8 +289,8 @@ addEventListener('pointermove', () => {
 
 addEventListener('resize', resize)
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { cancelAnimationFrame(raf); raf = 0; clearTimeout(timer) }
-  else { syncSeconds(); updateBands(); requestDraw() }
+  if (document.hidden) { cancelAnimationFrame(raf); raf = 0; clearTimeout(timer); clearTimeout(tickTimer) }
+  else { syncSeconds(); updateBands(); requestDraw(); scheduleTick() }
 })
 
 // ---------- 启动 ----------

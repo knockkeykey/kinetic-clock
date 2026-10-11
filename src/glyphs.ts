@@ -32,15 +32,27 @@ export const COLS = 8
 export const ROWS = 3
 export const CELLS = COLS * ROWS
 
-/** 4 个字符 → 24 个钟（行优先，8 列 × 3 行） */
+/** 字形左列三格都是空格（如 "1"） */
+const leftBlank = (g: Glyph) => [0, 2, 4].every((i) => isBlank(g[i]))
+
+/**
+ * 4 个字符 → 24 个钟（行优先，8 列 × 3 行）。
+ * 两两一组（时/分、月/日）：若组内第二个字左列为空（如 "51" 的 1），
+ * 第一个字右移一列贴过去，空列让到组的外侧，避免 14:51 看起来像 145:1
+ */
 export function compose(text: string): Hands[] {
-  const chars = [...text.padEnd(4, ' ')].slice(0, 4)
-  const out: Hands[] = new Array(CELLS)
-  chars.forEach((ch, gi) => {
-    const g = GLYPHS[ch] ?? GLYPHS[' ']
+  const glyphs = [...text.padEnd(4, ' ')].slice(0, 4).map((ch) => GLYPHS[ch] ?? GLYPHS[' '])
+  const out: Hands[] = Array.from({ length: CELLS }, () => [...IDLE] as Hands)
+  const put = (g: Glyph, col: number, from = 0) => {
     for (let r = 0; r < ROWS; r++)
-      for (let c = 0; c < 2; c++) out[r * COLS + gi * 2 + c] = [...g[r * 2 + c]] as Hands
-  })
+      for (let c = from; c < 2; c++) out[r * COLS + col + c] = [...g[r * 2 + c]] as Hands
+  }
+  for (const p of [0, 2]) {
+    const [a, b] = [glyphs[p], glyphs[p + 1]]
+    const shift = leftBlank(b) && !leftBlank(a) ? 1 : 0
+    put(b, (p + 1) * 2, shift) // 左列被 a 占用时只画右列
+    put(a, p * 2 + shift)
+  }
   return out
 }
 

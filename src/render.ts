@@ -48,6 +48,9 @@ export function create2D(canvas: HTMLCanvasElement): Renderer {
         ctx.arc(cx, cy, r, 0, Math.PI * 2)
         ctx.clip()
         ctx.lineCap = 'round'
+        // 收起/伸出时整根指针连同投影一起淡出/淡入（与 WebGL 一致）
+        const f = Math.min(1, k / 0.6)
+        ctx.globalAlpha = f * f * (3 - 2 * f)
         // 长度随 k 缩短；最后 20% 连粗细一起收掉（与 WebGL 一致）
         const wk = Math.min(1, k / 0.2)
         ctx.lineWidth = pitch * 0.068 * wk * wk * (3 - 2 * wk)

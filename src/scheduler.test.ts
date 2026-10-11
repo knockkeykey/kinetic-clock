@@ -76,10 +76,32 @@ describe('scheduler', () => {
     const t = new Date(2026, 9, 10, 9, 4, 5).getTime()
     expect(s.intro(t, compose('    '))).toBe(true)
     expect(poseAt(s.at(t), t)).toEqual(flat('    '))
-    expect(poseAt(s.at(t + 4_600), t + 4_600)).toEqual(flat('0904'))
+    // 先跳一段编舞，十几秒后才落成时间
+    expect(poseAt(s.at(t + 5_000), t + 5_000)).not.toEqual(flat('0904'))
+    expect(poseAt(s.at(t + 14_600), t + 14_600)).toEqual(flat('0904'))
     checkContinuity(s, t, 2)
     // 开场从空盘长出
     expect(lensAt(s.at(t), t)).toEqual(new Array(24).fill(0))
+  })
+})
+
+describe('intro near minute edge', () => {
+  it('spans into the next minute and lands on the next time', () => {
+    const s = new Scheduler({ takeoverEvery: () => 0, temperature: () => null })
+    const t = new Date(2026, 9, 10, 9, 4, 38).getTime()
+    expect(s.intro(t, compose('    '))).toBe(true)
+    expect(poseAt(s.at(t), t)).toEqual(flat('    '))
+    expect(poseAt(s.at(t + 23_000), t + 23_000)).toEqual(flat('0905'))
+    checkContinuity(s, t, 3)
+  })
+
+  it('late in :59 the intro replaces the hour show and lands on the hour', () => {
+    const s = new Scheduler({ takeoverEvery: () => 10, temperature: () => 7 })
+    const t = new Date(2026, 9, 10, 9, 59, 15).getTime()
+    expect(s.intro(t, compose('    '))).toBe(true)
+    expect(poseAt(s.at(t + 15_000), t + 15_000)).not.toEqual(flat("0959"))
+    expect(poseAt(s.at(t + 45_200), t + 45_200)).toEqual(flat("1000"))
+    checkContinuity(s, t, 3)
   })
 })
 

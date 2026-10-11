@@ -3,14 +3,15 @@
 //  每 N 分钟  :15 日期 → :26 温度 → :42 从温度直接过渡到下一分钟
 //  :59 分钟   :20 开始 40s 整点大编排
 
-import { CHOREOS, GRAND, INTRO, QUICK, evaluate, evaluateLen, landTimes, plan, retractLen, type Choreo, type Plan } from './choreo'
+import { CHOREOS, GRAND, INTROS, QUICK, evaluate, evaluateLen, landTimes, plan, retractLen, type Choreo, type Plan } from './choreo'
 import { compose, dateText, isBlank, tempText, timeText, type Hands } from './glyphs'
 
 export type Kind = 'time' | 'date' | 'temp'
 
 /** retractAt：每个空格钟的落定时刻（绝对时间，缩回在此刻收完）；-Infinity 表示早已藏好 */
 export interface Hold { type: 'hold'; start: number; end: number; pose: Hands[]; kind: Kind; retractAt: number[] }
-export interface Move { type: 'move'; start: number; end: number; plan: Plan; kind: Kind }
+/** span：整段编舞的真实起止时间。跨分钟的编舞会拆成几段，共用同一个 plan */
+export interface Move { type: 'move'; start: number; end: number; plan: Plan; kind: Kind; span?: [number, number] }
 export type Segment = Hold | Move
 
 const MIN = 60_000
@@ -163,16 +164,48 @@ export class Scheduler {
     })
   }
 
-  /** 开场：从空格姿态旋入当前姿态 */
-  intro(now: number, from: Hands[], ms = 4500): boolean {
-    return this.splice(now, (hold) => {
-      if (hold.end - now < ms + 500) return []
-      const p = plan(INTRO, from, hold.pose)
-      return [
-        { type: 'move', start: now, end: now + ms, plan: p, kind: hold.kind },
-        { ...hold, start: now + ms, retractAt: retractAfter(INTRO, p.hidden, now, now + ms) },
-      ]
-    })
+  /**
+   * 开场：从空盘先跳一段编舞，再落成时间。
+   * 落点选在 now + ms 附近、某个"时间"静止片段里；不够放就顺延到下一个时间片段，必要时跨分钟。
+   */
+  intro(now: number, from: Hands[], ms = 14 * S, minMs = 9 * S): boolean {
+    const choreo = INTROS[Math.floor(Math.random() * INTROS.length)]
+    // 找落点：第一个能在 [now + minMs, hold.end - 500] 里落下的时间片段
+    let target: Hold | null = null
+    let end = 0
+    const m0 = Math.floor(now / MIN) * MIN
+    for (let m = m0; m <= m0 + 2 * MIN && !target; m += MIN) {
+      for (const g of this.segments(m)) {
+        if (g.type !== 'hold' || g.kind !== 'time' || g.end <= now) continue
+        const lo = Math.max(g.start, now + minMs), hi = g.end - 500
+        if (lo > hi) continue
+        target = g
+        end = Math.min(Math.max(now + ms, lo), hi)
+        break
+      }
+    }
+    if (!target) return false
+    const p = plan(choreo, from, target.pose)
+    const span: [number, number] = [now, end]
+    // 把 [now, end) 之间原有的片段换成开场编舞，按分钟边界切开
+    for (let m = m0; m < end; m += MIN) {
+      const segs = this.segments(m)
+      const a = Math.max(now, m), b = Math.min(end, m + MIN)
+      const kept: Segment[] = []
+      for (const g of segs) {
+        if (g.end <= a || g.start >= b) { kept.push(g); continue }
+        if (g.start < a) kept.push({ ...g, end: a } as Segment)
+        if (g.end > b) {
+          const tail = { ...g, start: b } as Segment
+          if (g === target) (tail as Hold).retractAt = retractAfter(choreo, p.hidden, now, end)
+          kept.push(tail)
+        }
+      }
+      kept.push({ type: 'move', start: a, end: b, plan: p, kind: 'time', span })
+      kept.sort((x, y) => x.start - y.start)
+      this.cache.set(m, kept)
+    }
+    return true
   }
 
   private rebaseNextMove(now: number, at: number, from: Hands[]) {
@@ -195,8 +228,9 @@ export function sample(seg: Segment, now: number, out: Float32Array, lens?: Floa
     })
     return moving
   }
-  const t = (now - seg.start) / (seg.end - seg.start)
+  const [a, b] = seg.span ?? [seg.start, seg.end]
+  const t = Math.min(1, (now - a) / (b - a))
   evaluate(seg.plan, t, out)
-  if (lens) evaluateLen(seg.plan, t, seg.end - seg.start, lens)
+  if (lens) evaluateLen(seg.plan, t, b - a, lens)
   return t < 1
 }

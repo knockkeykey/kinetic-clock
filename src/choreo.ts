@@ -42,6 +42,12 @@ function delta(from: number, target: number, dir: Dir, turns: number): number {
 const colN = (c: Cell) => c.col / (COLS - 1)
 const centerDist = (c: Cell) => Math.abs(c.col - (COLS - 1) / 2) / ((COLS - 1) / 2)
 const left = (c: Cell) => c.col < COLS / 2
+const CX = (COLS - 1) / 2, CY = (ROWS - 1) / 2
+/** 离面板中心的距离，0..1 */
+const radial = (c: Cell) => Math.hypot(c.col - CX, c.row - CY) / Math.hypot(CX, CY)
+/** 从面板中心指向该钟的角度（0° 正上，顺时针） */
+const outward = (c: Cell) => mod((Math.atan2(c.col - CX, -(c.row - CY)) * 180) / Math.PI)
+const odd = (c: Cell) => (c.col + c.row) % 2 === 1
 
 const final: Target = (_c, _f, to) => to
 const pose = (a: number, b: number): Target => () => [a, b]
@@ -91,6 +97,58 @@ export const CHOREOS: Choreo[] = [
     name: 'counter',
     stages: [settle(1, 2)],
   },
+  {
+    // 所有指针从中心向外放射成星芒，由内向外一圈圈张开又合上
+    name: 'starburst',
+    stages: [
+      { w: 0.25, target: (c) => [outward(c), outward(c)], dir: () => [0, 0], delay: radial, spread: 0.3 },
+      { w: 0.4, target: (c) => [outward(c), outward(c)], dir: () => [1, -1], turns: () => [1, 1], delay: radial, spread: 0.5 },
+      { w: 0.35, target: final, dir: () => [1, -1], delay: (c) => 1 - radial(c), spread: 0.3 },
+    ],
+  },
+  {
+    // 每列角度依次错开 22.5°，整面板像一条扭转的缎带一起旋转
+    name: 'ribbon',
+    stages: [
+      { w: 0.25, target: (c) => [colN(c) * 157.5, colN(c) * 157.5 + 180], dir: () => [0, 0] },
+      { w: 0.4, target: (c) => [colN(c) * 157.5 + 180, colN(c) * 157.5 + 360], dir: () => [1, 1], turns: () => [1, 1] },
+      settle(0.35, 0),
+    ],
+  },
+  {
+    // 三行横线，上下两行顺时针、中间一行逆时针，像齿轮咬合
+    name: 'gears',
+    stages: [
+      { w: 0.25, target: pose(90, 270), dir: () => [0, 0], delay: (c) => c.row / (ROWS - 1), spread: 0.3 },
+      {
+        w: 0.4, target: pose(90, 270),
+        dir: (c) => (c.row % 2 ? [-1, -1] : [1, 1]), turns: () => [1, 1],
+        delay: (c) => (c.row % 2 ? 1 - colN(c) : colN(c)), spread: 0.45,
+      },
+      settle(0.35, 0),
+    ],
+  },
+  {
+    // 棋盘格：相邻的钟朝相反方向转，斜线 / 与 \ 交替翻转
+    name: 'checker',
+    stages: [
+      { w: 0.25, target: (c) => (odd(c) ? [135, 315] : [45, 225]), dir: () => [0, 0] },
+      { w: 0.4, target: (c) => (odd(c) ? [45, 225] : [135, 315]), dir: (c) => (odd(c) ? [-1, -1] : [1, 1]), turns: () => [1, 1] },
+      settle(0.35, 0),
+    ],
+  },
+  {
+    // 像秒针一样一格一格跳：竖线 → 横线 → 竖线 → 横线，每一步从左到右传过去
+    name: 'tick',
+    stages: [
+      { w: 0.15, target: pose(0, 180), dir: () => [0, 0] },
+      { w: 0.12, target: pose(90, 270), dir: () => [1, 1], delay: colN, spread: 0.5 },
+      { w: 0.12, target: pose(180, 360), dir: () => [1, 1], delay: colN, spread: 0.5 },
+      { w: 0.12, target: pose(270, 450), dir: () => [1, 1], delay: colN, spread: 0.5 },
+      { w: 0.12, target: pose(360, 540), dir: () => [1, 1], delay: colN, spread: 0.5 },
+      settle(0.37, 0),
+    ],
+  },
 ]
 
 /** 整点大编排：斜线 → 波浪 → 镜像 → 落定 */
@@ -117,11 +175,46 @@ export const QUICK: Choreo = {
   stages: [{ w: 1, target: final, dir: () => [1, -1], delay: colN, spread: 0.25 }],
 }
 
-/** 开场：从空格姿态旋入 */
-export const INTRO: Choreo = {
-  name: 'intro',
-  stages: [{ w: 1, target: final, dir: () => [1, -1], turns: () => [1, 1], delay: (c) => (c.row * COLS + c.col) / (ROWS * COLS - 1), spread: 0.4 }],
-}
+/** 开场编舞：从收起的空盘长出指针，跳完一段再落成时间 */
+export const INTROS: Choreo[] = [
+  {
+    // 从中心向外绽开成星芒 → 旋转一圈 → 收成斜线整体转半圈 → 落定
+    name: 'intro-bloom',
+    stages: [
+      { w: 0.18, target: (c) => [outward(c), outward(c)], dir: () => [1, 1], delay: radial, spread: 0.5 },
+      { w: 0.2, target: (c) => [outward(c), outward(c)], dir: () => [1, -1], turns: () => [1, 1], delay: radial, spread: 0.45 },
+      { w: 0.12, target: pose(45, 225), dir: () => [0, 0], delay: (c) => 1 - radial(c), spread: 0.4 },
+      { w: 0.18, target: pose(225, 405), dir: () => [1, 1] },
+      settle(0.32),
+    ],
+  },
+  {
+    // 从左到右竖起一排 → 波浪 → 齿轮横线 → 落定
+    name: 'intro-sweep',
+    stages: [
+      { w: 0.16, target: pose(0, 180), dir: () => [1, -1], delay: colN, spread: 0.55 },
+      { w: 0.2, target: pose(0, 180), dir: () => [1, 1], turns: () => [1, 1], delay: colN, spread: 0.55 },
+      { w: 0.1, target: pose(90, 270), dir: () => [1, 1] },
+      {
+        w: 0.22, target: pose(90, 270),
+        dir: (c) => (c.row % 2 ? [-1, -1] : [1, 1]), turns: () => [1, 1],
+        delay: (c) => (c.row % 2 ? 1 - colN(c) : colN(c)), spread: 0.45,
+      },
+      settle(0.32, 0),
+    ],
+  },
+  {
+    // 棋盘格斜线翻转 → 缎带旋转 → 镜像折线向外散开 → 落定
+    name: 'intro-weave',
+    stages: [
+      { w: 0.16, target: (c) => (odd(c) ? [135, 315] : [45, 225]), dir: () => [1, -1], delay: (c) => c.row / (ROWS - 1), spread: 0.4 },
+      { w: 0.18, target: (c) => (odd(c) ? [45, 225] : [135, 315]), dir: (c) => (odd(c) ? [-1, -1] : [1, 1]), turns: () => [1, 1] },
+      { w: 0.1, target: (c) => [colN(c) * 157.5, colN(c) * 157.5 + 180], dir: () => [0, 0] },
+      { w: 0.18, target: (c) => [colN(c) * 157.5 + 180, colN(c) * 157.5 + 360], dir: () => [1, 1], turns: () => [1, 1] },
+      { w: 0.38, target: final, dir: (c) => (left(c) ? [1, -1] : [-1, 1]), delay: (c) => 1 - centerDist(c), spread: 0.35 },
+    ],
+  },
+]
 
 /**
  * 每个阶段每个钟的起止角度预先算好，求值时只做插值。

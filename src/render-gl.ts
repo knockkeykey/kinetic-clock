@@ -81,14 +81,16 @@ void main() {
     // 指针投影：离盘底有一段高度，沿光反方向偏移并虚化
     float lift = 0.035 + depthHere * 0.6;
     float sd = hands(p + L2 * lift, idx);
-    float sh = 1.0 - smoothstep(-0.02, 0.05, sd);
+    // 收起/伸出时整根指针连同投影一起淡出/淡入
+    float fade = smoothstep(0.0, 0.6, u_len[idx]);
+    float sh = (1.0 - smoothstep(-0.02, 0.05, sd)) * fade;
     dish *= 1.0 - 0.16 * sh * u_shadow;
 
     col = mix(col, dish, inside);
 
     // 指针本体
     float hd = hands(p, idx);
-    float cov = 1.0 - smoothstep(-px * 0.75, px * 0.75, hd);
+    float cov = (1.0 - smoothstep(-px * 0.75, px * 0.75, hd)) * fade;
     // 极轻的立体感：靠光一侧稍亮
     vec3 hc = u_hand * (1.0 + 0.04 * u_shadow);
     col = mix(col, hc, cov * inside);
