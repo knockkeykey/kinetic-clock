@@ -114,6 +114,7 @@ body.dark #mode .sun { display: block; }
 #tools button[hidden] { display: none; }
 
 #panel {
+  --panel-text: #3c3a37;
   position: fixed;
   z-index: 3;
   top: calc(var(--vy, 0px) + var(--vh, 100dvh) / 2);
@@ -126,13 +127,12 @@ body.dark #mode .sun { display: block; }
   max-height: calc(var(--vh, 100dvh) - 32px - var(--sat) - var(--sab));
   overflow: hidden;
   border-radius: 14px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: var(--bg);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
-  font: 300 14px/1.4 var(--serif);
-  color: var(--text);
+  font: 400 14px/1.4 var(--serif);
+  color: var(--panel-text);
 }
+body.dark #panel { --panel-text: #ddd7cd; }
 #panel[hidden] { display: none; }
 #panel-handle { flex: none; padding: 16px 24px; cursor: grab; touch-action: none; }
 #panel .panel-content {
@@ -147,7 +147,7 @@ body.dark #mode .sun { display: block; }
 #panel .panel-footer {
   flex: none;
   padding: 12px 24px 18px;
-  border-top: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--panel-text) 18%, transparent);
 }
 #panel .panel-footer button { width: 100%; }
 #panel label { display: grid; gap: 6px; }
@@ -156,14 +156,15 @@ body.dark #mode .sun { display: block; }
   font: inherit;
   color: inherit;
   padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-text) 40%, transparent);
   border-radius: 6px;
-  background: transparent;
+  background: color-mix(in srgb, var(--bg), var(--panel-text) 5%);
 }
+#panel input::placeholder { color: color-mix(in srgb, var(--panel-text) 75%, var(--bg)); opacity: 1; }
 #panel button {
   font: inherit;
   color: var(--bg);
-  background: var(--text);
+  background: var(--panel-text);
   border: 0;
   border-radius: 6px;
   padding: 8px;
