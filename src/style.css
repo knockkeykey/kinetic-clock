@@ -116,17 +116,15 @@ body.dark #mode .sun { display: block; }
 #panel {
   position: fixed;
   z-index: 3;
-  top: 50%;
-  left: 50%;
+  top: calc(var(--vy, 0px) + var(--vh, 100dvh) / 2);
+  left: calc(var(--vx, 0px) + var(--vw, 100vw) / 2);
   transform: translate(calc(-50% + var(--px, 0px)), calc(-50% + var(--py, 0px)));
-  display: grid;
-  gap: 14px;
-  cursor: grab;
-  touch-action: none;
-  min-width: 260px;
-  max-height: calc(100dvh - 32px);
-  overflow-y: auto;
-  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(var(--vw, 100vw) - 32px - var(--sal) - var(--sar));
+  max-height: calc(var(--vh, 100dvh) - 32px - var(--sat) - var(--sab));
+  overflow: hidden;
   border-radius: 14px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(18px);
@@ -136,6 +134,22 @@ body.dark #mode .sun { display: block; }
   color: var(--text);
 }
 #panel[hidden] { display: none; }
+#panel-handle { flex: none; padding: 16px 24px; cursor: grab; touch-action: none; }
+#panel .panel-content {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: 0 24px 16px;
+}
+#panel .panel-footer {
+  flex: none;
+  padding: 12px 24px 18px;
+  border-top: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+}
+#panel .panel-footer button { width: 100%; }
 #panel label { display: grid; gap: 6px; }
 #panel label.row { display: flex; align-items: center; gap: 8px; }
 #panel input:not([type]), #panel select {
@@ -183,14 +197,13 @@ body.dark #mode .sun { display: block; }
   border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
   padding: 6px;
 }
-#panel.dragging { cursor: grabbing; }
+#panel.dragging #panel-handle { cursor: grabbing; }
 #panel input, #panel select { cursor: auto; }
 #panel button, #panel label.row, #panel select { cursor: pointer; }
 #panel .grip {
-  justify-self: center;
   width: 36px;
   height: 4px;
-  margin: -8px 0 -4px;
+  margin: 0 auto;
   border-radius: 2px;
   background: color-mix(in srgb, var(--text) 25%, transparent);
 }

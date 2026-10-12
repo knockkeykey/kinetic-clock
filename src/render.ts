@@ -9,6 +9,8 @@ export interface Frame {
   angles: Float32Array
   /** 每个钟的指针长度系数 0..1 */
   lens: Float32Array
+  /** 第一列钟盘及指针的整体可见度 */
+  firstColumnOpacity: number
   layout: Layout
   dpr: number
   light: [number, number]
@@ -22,7 +24,7 @@ export function create2D(canvas: HTMLCanvasElement): Renderer {
   const ctx = canvas.getContext('2d', { alpha: false })!
   return {
     kind: '2d',
-    draw({ angles, lens, layout, dpr, light, palette }: Frame) {
+    draw({ angles, lens, firstColumnOpacity, layout, dpr, light, palette }: Frame) {
       const { pitch } = layout
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.fillStyle = css(palette.bg)
@@ -31,6 +33,8 @@ export function create2D(canvas: HTMLCanvasElement): Renderer {
       const len = pitch * 0.4
       const lx = light[0], ly = -light[1] // 屏幕 y 向下
       for (let i = 0; i < 24; i++) {
+        ctx.globalAlpha = i % 8 === 0 ? firstColumnOpacity : 1
+        if (ctx.globalAlpha === 0) continue
         const cx = layout.x + (i % 8 + 0.5) * pitch
         const cy = layout.y + (Math.floor(i / 8) + 0.5) * pitch
         // 凹盘：朝光一侧内壁暗、背光一侧亮
@@ -51,7 +55,7 @@ export function create2D(canvas: HTMLCanvasElement): Renderer {
         ctx.lineCap = 'round'
         // 收起/伸出时整根指针连同投影一起淡出/淡入（与 WebGL 一致）
         const f = Math.min(1, k / 0.6)
-        ctx.globalAlpha = f * f * (3 - 2 * f)
+        ctx.globalAlpha *= f * f * (3 - 2 * f)
         // 长度随 k 缩短；最后 20% 连粗细一起收掉（与 WebGL 一致）
         const wk = Math.min(1, k / 0.2)
         ctx.lineWidth = pitch * 0.068 * wk * wk * (3 - 2 * wk)
@@ -70,6 +74,7 @@ export function create2D(canvas: HTMLCanvasElement): Renderer {
         stroke(0, 0)
         ctx.restore()
       }
+      ctx.globalAlpha = 1
     },
   }
 }

@@ -13,6 +13,7 @@ uniform vec2 u_origin;   // 网格左下角（设备像素，y 向上）
 uniform float u_pitch;   // 每个钟所占边长（设备像素）
 uniform float u_ang[48]; // 角度（度），0 向上，顺时针
 uniform float u_len[24]; // 指针长度系数 0..1（空格指针缩回到 0）
+uniform float u_firstColumnOpacity;
 uniform vec3 u_light;    // 指向光源，z 为高度
 uniform vec3 u_bg;
 uniform vec3 u_hand;
@@ -147,6 +148,7 @@ void main() {
   vec3 col = u_bg;
   float tex = mix(1.0, texShade(g, L2, px), u_tex);
   col *= tex;
+  vec3 panelColor = col;
 
   ivec2 cell = ivec2(floor(g));
   if (cell.x >= 0 && cell.x < 8 && cell.y >= 0 && cell.y < 3) {
@@ -212,6 +214,7 @@ void main() {
       col = mix(col, hc, c0 * inside);
     }
     if (c1 > 0.0) col = mix(col, handShade(p, idx, 1, L, px), c1 * inside);
+    if (cell.x == 0) col = mix(panelColor, col, u_firstColumnOpacity);
   }
 
   // 整块面板被一盏灯照着：朝光一侧整体略亮并有一团柔光，四角压暗。
@@ -260,6 +263,7 @@ export function createGL(canvas: HTMLCanvasElement): Renderer | null {
   const U = {
     origin: u('u_origin'), pitch: u('u_pitch'), ang: u('u_ang'), len: u('u_len'), light: u('u_light'),
     bg: u('u_bg'), hand: u('u_hand'), shadow: u('u_shadow'), tex: u('u_tex'), blur: u('u_blur'), res: u('u_res'),
+    firstColumnOpacity: u('u_firstColumnOpacity'),
   }
 
   // 运动模糊：按上一帧到这一帧的角速度，换算成固定快门（≈1/120s，即 60fps 下 180° 快门）内扫过的角度
@@ -295,6 +299,7 @@ export function createGL(canvas: HTMLCanvasElement): Renderer | null {
       gl.uniform1f(U.pitch, f.layout.pitch * s)
       gl.uniform1fv(U.ang, f.angles)
       gl.uniform1fv(U.len, f.lens)
+      gl.uniform1f(U.firstColumnOpacity, f.firstColumnOpacity)
       gl.uniform1fv(U.blur, blur)
       gl.uniform2f(U.res, w, h)
       gl.uniform3f(U.light, f.light[0], f.light[1], 0.62)

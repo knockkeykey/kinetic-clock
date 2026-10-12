@@ -35,33 +35,36 @@
       </button>
     </div>
     <form id="panel" hidden>
-      <div class="grip" aria-hidden="true"></div>
-      <label>城市<input name="city" placeholder="留空则自动定位" autocomplete="off" /></label>
-      <label>主题
-        <select name="theme"><option value="auto">随日出日落</option><option value="light">白</option><option value="dark">黑</option></select>
-      </label>
-      <label>日期 / 温度
-        <select name="every"><option value="0">关闭</option><option value="5">每 5 分钟</option><option value="10">每 10 分钟</option><option value="15">每 15 分钟</option><option value="30">每 30 分钟</option></select>
-      </label>
-      <label class="row"><input type="checkbox" name="seconds" />秒进度线</label>
-      <label class="row"><input type="checkbox" name="sound" />滴答声</label>
-      <label class="row"><input type="checkbox" name="debug" />调试模式</label>
-      <fieldset id="dbg" hidden>
-        <label class="row"><input type="checkbox" name="blanks" />显示隐藏的指针</label>
-        <label>预设时间
-          <span class="line"><input type="datetime-local" name="at" step="1" /><button type="button" id="dbg-set">应用</button></span>
+      <div id="panel-handle"><div class="grip" aria-hidden="true"></div></div>
+      <div class="panel-content">
+        <label>城市<input name="city" placeholder="留空则自动定位" autocomplete="off" /></label>
+        <label>主题
+          <select name="theme"><option value="auto">随日出日落</option><option value="light">白</option><option value="dark">黑</option></select>
         </label>
-        <button type="button" id="dbg-real" class="ghost">恢复真实时间</button>
-        <span class="line">
-          <button type="button" class="ghost" data-show="time">时间</button>
-          <button type="button" class="ghost" data-show="date">日期</button>
-          <button type="button" class="ghost" data-show="temp">温度</button>
-        </span>
-        <label>编舞
-          <span class="line"><select name="choreo"></select><button type="button" id="dbg-play">播放</button></span>
+        <label>日期 / 温度
+          <select name="every"><option value="0">关闭</option><option value="5">每 5 分钟</option><option value="10">每 10 分钟</option><option value="15">每 15 分钟</option><option value="30">每 30 分钟</option></select>
         </label>
-      </fieldset>
-      <button type="submit">完成</button>
+        <label class="row"><input type="checkbox" name="seconds" />秒进度线</label>
+        <label class="row"><input type="checkbox" name="sound" />滴答声</label>
+        <label class="row"><input type="checkbox" name="hideFirstColumn" />自动隐藏空闲的第一列时钟</label>
+        <label class="row"><input type="checkbox" name="debug" />调试模式</label>
+        <fieldset id="dbg" hidden>
+          <label class="row"><input type="checkbox" name="blanks" />显示隐藏的指针</label>
+          <label>预设时间
+            <span class="line"><input type="datetime-local" name="at" step="1" /><button type="button" id="dbg-set">应用</button></span>
+          </label>
+          <button type="button" id="dbg-real" class="ghost">恢复真实时间</button>
+          <span class="line">
+            <button type="button" class="ghost" data-show="time">时间</button>
+            <button type="button" class="ghost" data-show="date">日期</button>
+            <button type="button" class="ghost" data-show="temp">温度</button>
+          </span>
+          <label>编舞
+            <span class="line"><select name="choreo"></select><button type="button" id="dbg-play">播放</button></span>
+          </label>
+        </fieldset>
+      </div>
+      <div class="panel-footer"><button type="submit">完成</button></div>
     </form>
     <script type="module" src="/src/main.ts"></script>
   </body>

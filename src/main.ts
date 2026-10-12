@@ -3,6 +3,7 @@ import './style.css'
 
 import { CHOREOS, GRAND, INTROS, QUICK } from './choreo'
 import * as clock from './clock'
+import { firstColumnUnused } from './columns'
 import { compose, type Hands } from './glyphs'
 import { fetchWeather, isNight, lightDir, lunarLine, resolvePlace, weatherLine, type Place, type Weather } from './info'
 import { createGL } from './render-gl'
@@ -46,8 +47,10 @@ const sched = new Scheduler({
 
 // ---------- 布局 ----------
 let layout: Layout = { x: 0, y: 0, pitch: 0, w: 0, h: 0 }
+let drawLayout: Layout = layout
 let dpr = 1
 let jitter: [number, number] = [0, 0]
+let firstColumnHidden = 0
 
 function resize() {
   const W = innerWidth, H = innerHeight
@@ -64,14 +67,23 @@ function resize() {
   const pitch = Math.min((aw * (small ? 0.96 : 0.88)) / 8, (ah * (small ? 0.84 : 0.66)) / 3.55)
   const w = pitch * 8, h = pitch * 3
   layout = { x: sl + (aw - w) / 2 + jitter[0], y: st + (ah - pitch * 3.55) / 2 + jitter[1], pitch, w, h }
+  syncLayout()
+  requestDraw()
+}
+
+/** 收起第一列时保留钟盘尺寸，剩余七列与信息带一起居中。 */
+function syncLayout() {
+  const { pitch } = layout
+  const hidden = firstColumnHidden * firstColumnHidden * (3 - 2 * firstColumnHidden)
+  const shift = hidden * pitch / 2
   const s = document.documentElement.style
-  s.setProperty('--gx', `${layout.x}px`)
+  s.setProperty('--gx', `${layout.x + shift}px`)
   s.setProperty('--gy', `${layout.y}px`)
-  s.setProperty('--gw', `${w}px`)
-  s.setProperty('--gh', `${h}px`)
+  s.setProperty('--gw', `${layout.w - hidden * pitch}px`)
+  s.setProperty('--gh', `${layout.h}px`)
   s.setProperty('--pitch', `${pitch}px`)
   s.setProperty('--fs', `${Math.max(11, Math.min(22, pitch * 0.12))}px`)
-  requestDraw()
+  drawLayout = { ...layout, x: layout.x - shift }
 }
 
 /** 防烧屏：每次过渡开始时整体挪动几个像素，藏在运动里 */
@@ -171,10 +183,18 @@ function frame(t: number) {
     for (let i = 0; i < lens.length; i++) lens[i] += (1 - lens[i]) * k
   }
 
-  const base = lightDir(d, place)
-  const settling = renderer.draw({ angles, lens, layout, dpr, palette: pal, light: [base[0] + tilt[0] * 0.6, base[1] - tilt[1] * 0.45] })
+  // 编舞时恢复整列；静止画面只隐藏已经收完指针的空闲列。
+  const columnTarget = settings.hideFirstColumn && !showBlanks && seg.type === 'hold' && firstColumnUnused(lens) ? 1 : 0
+  if (firstColumnHidden !== columnTarget) {
+    firstColumnHidden += Math.sign(columnTarget - firstColumnHidden) * dt / 650
+    firstColumnHidden = Math.max(0, Math.min(1, firstColumnHidden))
+    syncLayout()
+  }
 
-  const busy = moving || blankMix !== bt || night !== nt || tiltDirty || settling === true
+  const base = lightDir(d, place)
+  const settling = renderer.draw({ angles, lens, firstColumnOpacity: 1 - firstColumnHidden, layout: drawLayout, dpr, palette: pal, light: [base[0] + tilt[0] * 0.6, base[1] - tilt[1] * 0.45] })
+
+  const busy = moving || blankMix !== bt || firstColumnHidden !== columnTarget || night !== nt || tiltDirty || settling === true
   tiltDirty = false
   if (busy) raf = requestAnimationFrame(frame)
   else timer = window.setTimeout(requestDraw, Math.max(16, Math.min(seg.end - now, 30_000)))
@@ -283,11 +303,13 @@ gear.addEventListener('click', () => {
   f.every.value = String(settings.every)
   f.seconds.checked = settings.seconds
   f.sound.checked = settings.sound
+  f.hideFirstColumn.checked = settings.hideFirstColumn
   f.debug.checked = settings.debug
   f.blanks.checked = showBlanks
   debugBox.hidden = !settings.debug
   if (settings.debug) f.at.value = localInput(clock.now())
   panel.hidden = false
+  fitPanel()
   tools.classList.remove('show')
 })
 
@@ -299,6 +321,7 @@ panel.addEventListener('submit', (e) => {
   save({
     city, theme: f.theme.value as typeof settings.theme, every: Number(f.every.value),
     seconds: f.seconds.checked, sound: f.sound.checked, debug: f.debug.checked,
+    hideFirstColumn: f.hideFirstColumn.checked,
   })
   panel.hidden = true
   if (!settings.debug) showBlanks = false
@@ -348,33 +371,48 @@ function applied(ok: boolean, fail = '稍后再试') {
   requestDraw()
 }
 
-dbg.debug.addEventListener('change', () => { debugBox.hidden = !dbg.debug.checked; if (dbg.debug.checked) dbg.at.value = localInput(clock.now()) })
+dbg.debug.addEventListener('change', () => { debugBox.hidden = !dbg.debug.checked; if (dbg.debug.checked) dbg.at.value = localInput(clock.now()); fitPanel() })
 
 dbg.blanks.addEventListener('change', () => { showBlanks = dbg.blanks.checked; requestDraw() })
 
-// 设置窗口：按住空白处拖动
+// 设置窗口：仅拖动顶部把手，内容区域保留触摸滚动。
+const panelHandle = $('panel-handle')
 let drag: { id: number; x: number; y: number; px: number; py: number } | null = null
 let panelPos: [number, number] = [0, 0]
 function placePanel(x: number, y: number) {
-  // 至少留 40px 在屏幕内，拖不丢
+  const v = visualViewport
+  const width = v?.width ?? innerWidth, height = v?.height ?? innerHeight
+  const vx = v?.offsetLeft ?? 0, vy = v?.offsetTop ?? 0
+  const cs = getComputedStyle(document.documentElement)
+  const inset = (k: string) => 16 + (parseFloat(cs.getPropertyValue(k)) || 0)
   const r = panel.getBoundingClientRect()
-  const mx = (innerWidth + r.width) / 2 - 40, my = (innerHeight + r.height) / 2 - 40
-  panelPos = [Math.max(-mx, Math.min(mx, x)), Math.max(-my, Math.min(my, y))]
+  const mx = (width - r.width) / 2, my = (height - r.height) / 2
+  panelPos = [Math.max(inset('--sal') - mx, Math.min(mx - inset('--sar'), x)), Math.max(inset('--sat') - my, Math.min(my - inset('--sab'), y))]
+  panel.style.setProperty('--vx', `${vx}px`)
+  panel.style.setProperty('--vy', `${vy}px`)
   panel.style.setProperty('--px', `${panelPos[0]}px`)
   panel.style.setProperty('--py', `${panelPos[1]}px`)
 }
-panel.addEventListener('pointerdown', (e) => {
-  if ((e.target as HTMLElement).closest('input, select, button, label.row')) return
+function fitPanel() {
+  const v = visualViewport
+  panel.style.setProperty('--vw', `${v?.width ?? innerWidth}px`)
+  panel.style.setProperty('--vh', `${v?.height ?? innerHeight}px`)
+  if (!panel.hidden) placePanel(...panelPos)
+}
+panelHandle.addEventListener('pointerdown', (e) => {
   drag = { id: e.pointerId, x: e.clientX, y: e.clientY, px: panelPos[0], py: panelPos[1] }
-  panel.setPointerCapture(e.pointerId)
+  panelHandle.setPointerCapture(e.pointerId)
   panel.classList.add('dragging')
 })
-panel.addEventListener('pointermove', (e) => {
+panelHandle.addEventListener('pointermove', (e) => {
   if (drag?.id === e.pointerId) placePanel(drag.px + e.clientX - drag.x, drag.py + e.clientY - drag.y)
 })
 const endDrag = (e: PointerEvent) => { if (drag?.id !== e.pointerId) return; drag = null; panel.classList.remove('dragging') }
-panel.addEventListener('pointerup', endDrag)
-panel.addEventListener('pointercancel', endDrag)
+panelHandle.addEventListener('pointerup', endDrag)
+panelHandle.addEventListener('pointercancel', endDrag)
+addEventListener('resize', fitPanel)
+visualViewport?.addEventListener('resize', fitPanel)
+visualViewport?.addEventListener('scroll', fitPanel)
 
 $('dbg-set').addEventListener('click', () => {
   const t = new Date(dbg.at.value).getTime()

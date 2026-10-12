@@ -6,11 +6,12 @@ export interface Settings {
   theme: 'auto' | 'light' | 'dark'
   every: number
   seconds: boolean
+  hideFirstColumn: boolean
   debug: boolean
 }
 
 const KEY = 'kc.settings'
-const DEFAULTS: Settings = { city: '', sound: false, theme: 'auto', every: 10, seconds: false, debug: false }
+const DEFAULTS: Settings = { city: '', sound: false, theme: 'auto', every: 10, seconds: false, hideFirstColumn: false, debug: false }
 
 function fromURL(): Partial<Settings> {
   const q = new URLSearchParams(location.search)
@@ -24,6 +25,7 @@ function fromURL(): Partial<Settings> {
     if ([0, 5, 10, 15, 30].includes(n)) o.every = n
   }
   if (q.has('seconds')) o.seconds = q.get('seconds') === '1'
+  if (q.has('hideFirstColumn')) o.hideFirstColumn = q.get('hideFirstColumn') === '1'
   if (q.has('debug')) o.debug = q.get('debug') === '1'
   return o
 }
